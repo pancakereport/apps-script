@@ -525,7 +525,7 @@ function generateAdminSheet() {
 function generateInstructorSheets() {
   // course mappings for dynamic grade column selection
   const relevantCourses = {
-    "DATA 89": [],
+    "DATA 89": ["MATH 1B", "MATH 52", "MATH 53", "DATA C88S", "DATA C140", "STAT 134"],
     "DATA C4AC": ["DATA C104", "DATA C4AC"],
     "DATA C8": ["DATA C8"],
     "DATA 36": ["DATA 36"],
@@ -535,7 +535,7 @@ function generateInstructorSheets() {
     "DATA C104": ["DATA C104", "DATA C4AC"],
     "DATA C140": ["DATA C88S", "DATA C140", "EECS 126", "INDENG 172", "STAT 134", "DATA C8"],
     "DATA 145": [],
-    "DATA 188": ["DATA C100", "DATA C140"],
+    "DATA 188": ["DATA C100", "DATA C140", "COMPSCI 182", "COMPSCI C182", "DATA C182", "COMPSCI 189", "MATH 53", "EECS 127"],
     "DATA C200": ["DATA C8", "DATA C100", "DATA C200"],
     "DATA 375": ["DATA 375", "COMPSCI 370", "COMPSCI 375"]
   };
