@@ -10,16 +10,17 @@ This Apps Script combines information from the ALR, the supplemental application
 1. Download Applicant List Report from ACG and upload to Google Sheets. Name the sheet “ALR”.
 2. In the same Spreadsheet, create another sheet named “Information” with the following:
 Column A: Course Names; Column B: Course IDs from ACG (used to construct instructor links); Column C: Emails of Instructors who will have “Instructor View Spreadsheets” shared with them; Column D: Term from ACG (used to construct instructor links); Column E: Semester (used to name folders and spreadsheets).
+
     ![sheet named “Information” with the following: Column A: Course Names; Column B: Course IDs from ACG; Column C: Emails of Instructors who will have “Instructor View Spreadsheets” shared with them; Column D: Term from ACG ; Column E: Semester](images/information-sheet.png)
-3. Upload or link Supplemental Application data to another sheet in the same Google Spreadsheet named “Supplemental”. You should now have the following sheets within one Google Sheet Document: "ALR," "Information," "Supplemental".
-4. Place the [Apps Script](combine-data.js) in the spreadsheet you've been working on. To access Apps Script, click Extensions -> Apps Script. 
-5. While still in the Apps Script editor, enable the Google Sheets API by clicking Services -> Add a Service. Choose "Google Sheets API" and click "Add".
-6. You must also add Script Properties for the API app id and key in the project settings on the Apps Script page. They should be named `app_id` and `app_key`.
-7. Execute functions one at a time and in this order. You might need to approve permissions before running functions.
-    a. generateReviewLinks
-        i. Create a hidden sheet that includes the first six columns of ALR and the admin and instructor links to applications on ACG
-    b. generateAdminSheet
-        ii. Create the admin sheet (on the same spreadsheet that the ALR and Supplemental applications were uploaded to) that shows ACG admin and instructor links, all the ALR information, and the supplemental application for each student.
-    c. generateInstructorSheets
-        iii. Create a folder that contains a spreadsheet per course with columns identical to the admin sheet columns (with the exception of the admin link) with rows only for students who applied to that course. Folder is created in the same place in Google Drive as the spreadsheet you’re working from.
-8. If one or both of the supplemental application or ALR has an automatic sync, you can add a trigger to update the admin sheet on regular intervals. In the Apps Script page, click "Triggers" from the LH menu. Add a trigger that runs the `checkAndUpdateSheets` function with a "Time driven" event source. Because the API calls take a few minutes to run, I don't recommend triggers more than hourly. You should have failure notifications happen immediately.
+4. Upload or link Supplemental Application data to another sheet in the same Google Spreadsheet named “Supplemental”. You should now have the following sheets within one Google Sheet Document: "ALR," "Information," "Supplemental".
+5. Place the [Apps Script](combine-data.js) in the spreadsheet you've been working on. To access Apps Script, click Extensions -> Apps Script. 
+6. While still in the Apps Script editor, enable the Google Sheets API by clicking Services -> Add a Service. Choose "Google Sheets API" and click "Add".
+7. You must also add Script Properties for the API app id and key in the project settings on the Apps Script page. They should be named `app_id` and `app_key`.
+8. Execute functions one at a time and in this order. You might need to approve permissions before running functions.
+   
+    a. `generateReviewLinks`: Create a hidden sheet that includes the first six columns of ALR and the admin and instructor links to applications on ACG
+   
+    b. `generateAdminSheet`: Create the admin sheet (on the same spreadsheet that the ALR and Supplemental applications were uploaded to) that shows ACG admin and instructor links, all the ALR information, and the supplemental application for each student.
+   
+    c. `generateInstructorSheets`: Create a folder that contains a spreadsheet per course with columns identical to the admin sheet columns (with the exception of the admin link) with rows only for students who applied to that course. Folder is created in the same place in Google Drive as the spreadsheet you’re working from.
+10. If one or both of the supplemental application or ALR has an automatic sync, you can add a trigger to update the admin sheet on regular intervals. In the Apps Script page, click "Triggers" from the LH menu. Add a trigger that runs the `checkAndUpdateSheets` function with a "Time driven" event source. Because the API calls take a few minutes to run, I don't recommend triggers more than hourly. You should have failure notifications happen immediately.
