@@ -60,15 +60,22 @@ function generateReviewLinks() {
   const courseMap = new Map();
   for (let i = 1; i < infoData.length; i++) {
     const name = infoData[i][0]?.toString().trim();
-    const id = infoData[i][1];
-    if (name && id) {
-      courseMap.set(name, id);
+    // assume that courseId always exists and that ta, tutor, or reader ids may not
+    const courseId = infoData[i][1]; 
+    const taId = infoData[i][5] || null; // column F
+    const tutorId = infoData[i][6] || null; // column G
+    const readerId = infoData[i][7] || null; // column H
+    if (name && courseId) {
+      courseMap.set(name, {"courseId": courseId, 
+        "taId": taId, "tutorId": tutorId, "readerId": readerId} );
     }
   }
   // term
   const term = info.getRange(2, 4).getValue();
   // loop through ALR data and set review links
-  links.getRange(1, 8).setValue("Instructor Links")
+  links.getRange(1, 8).setValue("Instructor Links - TA");
+  links.getRange(1, 9).setValue("Instructor Links - Tutor");
+  links.getRange(1, 10).setValue("Instructor Links - Reader");
   links.getRange(1, 7).setValue("Admin Links")
   for (let i = 1; i < data.length; i++) {
     const applicantId = data[i][applicantIdIndex]; 
@@ -77,18 +84,38 @@ function generateReviewLinks() {
 
     // instructor links
     const courseNames = courseListRaw.toString().split(";").map(c => c.trim()).filter(Boolean);
-    const instructorLinks = [];
+    const instructorTaLinks = [];
+    const instructorTutorLinks = [];
+    const instructorReaderLinks = [];
     for (const courseName of courseNames) {
-      const courseId = courseMap.get(courseName);
-      if (courseId) {
-        const instructorURL = `https://deptapps.coe.berkeley.edu/ase/all/review/${courseId}/applicants/${applicantId}?term=${term}`;
-        instructorLinks.push(instructorURL);
+      const ids = courseMap.get(courseName);
+
+      if (ids.taId) {
+        const instructorURL = `https://deptapps.coe.berkeley.edu/ase/all/review/${ids.taId}/applicants/${applicantId}?term=${term}`;
+        instructorTaLinks.push(instructorURL);
       } else {
-        instructorLinks.push(`NOT_FOUND: ${courseName}`);
+        instructorTaLinks.push(`No TA positions for ${courseName}`);
+      }
+      if (ids.tutorId) {
+        const instructorURL = `https://deptapps.coe.berkeley.edu/ase/all/review/${ids.tutorId}/applicants/${applicantId}?term=${term}`;
+        instructorTutorLinks.push(instructorURL);
+      } else {
+        instructorTutorLinks.push(`No tutor positions for ${courseName}`);
+      }
+      if (ids.readerId) {
+        const instructorURL = `https://deptapps.coe.berkeley.edu/ase/all/review/${ids.readerId}/applicants/${applicantId}?term=${term}`;
+        instructorReaderLinks.push(instructorURL);
+      } else {
+        instructorReaderLinks.push(`No reader positions for ${courseName}`);
       }
     }
-    const output = instructorLinks.join('\n');
-    links.getRange(i + 1, 8).setValue(output); // column H = 8
+    
+    const taOutput = instructorTaLinks.join('\n');
+    links.getRange(i + 1, 8).setValue(taOutput); 
+    const tutorOutput = instructorTutorLinks.join('\n');
+    links.getRange(i + 1, 9).setValue(tutorOutput); 
+    const readerOutput = instructorReaderLinks.join('\n');
+    links.getRange(i + 1, 10).setValue(readerOutput);
 
     //admin links
     const adminURL = `https://deptapps.coe.berkeley.edu/ase/data/admin/applicants/${applicantId}`;
@@ -250,9 +277,11 @@ function fetchEnrollmentData(studentId) {
         const courseName = enrollment?.classSection?.class?.course?.displayName;
         // path to grade
         const grades = enrollment?.grades;
-        let grade = "Taken, but no grade found";
+        let grade;
         if (grades && grades.length > 0) {
-          grade = gradesArray.map(g => g?.mark || "N/A");        
+          grade = grades.map(g => g?.mark || "N/A").join(', ');        
+        } else {
+          grade = "Taken, but no grade found"
         }
         if (courseName) {
           // check if courseName already exists in the map 
@@ -290,7 +319,7 @@ function generateAdminSheet() {
     adminSheet = ss.insertSheet("Admin Sheet");
   }
 
-  const linksData = links.getRange(1, 1, links.getLastRow(), 8).getValues();
+  const linksData = links.getRange(1, 1, links.getLastRow(), 10).getValues();
   // read a wide range to ensure all ALR columns are included, even if they are empty
   const alrData = alr.getRange(1, 7, alr.getLastRow(), 25).getValues(); 
   const supData = sup.getDataRange().getValues();
@@ -519,13 +548,14 @@ function generateAdminSheet() {
   }
 }
 
+
 // ###################################
 // ## CREATE SHEETS FOR INSTRUCTORS ##
 // ###################################
 function generateInstructorSheets() {
   // course mappings for dynamic grade column selection
   const relevantCourses = {
-    "DATA 89": [],
+    "DATA 89": ["MATH 1B", "MATH 52", "MATH 53", "DATA C88S", "DATA C140", "STAT 134"],
     "DATA C4AC": ["DATA C104", "DATA C4AC"],
     "DATA C8": ["DATA C8"],
     "DATA 36": ["DATA 36"],
@@ -535,7 +565,7 @@ function generateInstructorSheets() {
     "DATA C104": ["DATA C104", "DATA C4AC"],
     "DATA C140": ["DATA C88S", "DATA C140", "EECS 126", "INDENG 172", "STAT 134", "DATA C8"],
     "DATA 145": [],
-    "DATA 188": ["DATA C100", "DATA C140"],
+    "DATA 188": ["DATA C100", "DATA C140", "COMPSCI 182", "COMPSCI C182", "DATA C182", "COMPSCI 189", "MATH 53", "EECS 127"],
     "DATA C200": ["DATA C8", "DATA C100", "DATA C200"],
     "DATA 375": ["DATA 375", "COMPSCI 370", "COMPSCI 375"]
   };
@@ -579,41 +609,101 @@ function generateInstructorSheets() {
   const adminData = adminSheet.getDataRange().getValues();
   const headers = adminData[0];
 
-  // define fixed and dynamic column boundaries
-  const fixedColumnCount = 43; // A (index 0) through AQ (index 42)
+  // indices of dynamic columns
   const classesIndex = headers.indexOf("Classes");
-  const linksIndex = headers.indexOf("Instructor Links");
+  const adminLinksIndex = headers.indexOf("Admin Links"); // drop this column from instructor sheets
+  const taLinksIndex = headers.indexOf("Instructor Links - TA");
+  const tutorLinksIndex = headers.indexOf("Instructor Links - Tutor");
+  const readerLinksIndex = headers.indexOf("Instructor Links - Reader");
+
+  if (classesIndex === -1 || taLinksIndex === -1 || tutorLinksIndex === -1 || readerLinksIndex === -1) {
+    Logger.log("Missing one or more critical headers: Classes, TA Links, Tutor Links, or Reader Links. Aborting.");
+    return;
+  }
+
+  // Define link columns and a placeholder part to check against
+  const linkColumnDetails = [
+    { index: taLinksIndex, header: "Instructor Links - TA", check: false, placeholder: "No TA positions" },
+    { index: tutorLinksIndex, header: "Instructor Links - Tutor", check: false, placeholder: "No tutor positions" },
+    { index: readerLinksIndex, header: "Instructor Links - Reader", check: false, placeholder: "No reader positions" }
+  ];
 
   // pre-process headers for dynamic selection
-  const initialFixedHeaders = headers.slice(0, fixedColumnCount); // A:AQ headers
-  const adminApiHeaders = headers.slice(fixedColumnCount); // AR:end headers (grade columns)
-
-  // determine the final fixed headers (A:AQ, excluding "Admin Links")
-  let finalFixedHeaders = [...initialFixedHeaders];
-  const adminLinksFixedIndex = initialFixedHeaders.indexOf("Admin Links");
-  if (adminLinksFixedIndex !== -1) {
-    finalFixedHeaders.splice(adminLinksFixedIndex, 1);
-  }
+  const fixedColumnCount = 45; // A (index 0) through AS (index 44)
+  const adminApiHeaders = headers.slice(fixedColumnCount); // AT:end headers (grade columns)
 
   // iterate through courses
   for (let i = 0; i < courses.length; i++) {
     const course = courses[i];
 
-    // determine which course grade columns are relevant for this specific course
-    const courseCodesToMatch = relevantCourses[course] || [];
-    const relevantApiIndices = []; // indices RELATIVE to adminApiHeaders (0, 1, 2...)
+    // pre-filter admin data for the current course
+    const courseAdminRecords = []; // stores { row: [], matchIndex: number }
 
-    for (let j = 0; j < adminApiHeaders.length; j++) {
-        if (courseCodesToMatch.includes(adminApiHeaders[j])) {
-            relevantApiIndices.push(j);
+    for (let j = 1; j < adminData.length; j++) {
+        const row = adminData[j];
+        const classesRaw = row[classesIndex];
+        if (!classesRaw) continue;
+
+        const classes = String(classesRaw).split(';').map(c => c.trim()).filter(Boolean);
+        const matchIndex = classes.indexOf(course);
+
+        if (matchIndex !== -1) {
+            courseAdminRecords.push({ row: row, matchIndex: matchIndex });
+        }
+    }
+    
+    if (courseAdminRecords.length === 0) {
+        Logger.log(`Skipping sheet creation for ${course}: No applicants found.`);
+        continue;
+    }
+
+    // determine which link columns to keep
+    // reset check status for the current course
+    linkColumnDetails.forEach(d => d.check = false); 
+
+    for (const record of courseAdminRecords) {
+        for (const linkCol of linkColumnDetails) {
+            const linkCellContent = record.row[linkCol.index];
+            if (linkCellContent) {
+                 const links = String(linkCellContent).split('\n');
+                 const specificLink = links[record.matchIndex];
+                 
+                 // check if the specific link does NOT contain the placeholder (meaning it's a URL)
+                 if (specificLink && !String(specificLink).toLowerCase().includes(linkCol.placeholder.toLowerCase())) {
+                     linkCol.check = true;
+                 }
+            }
         }
     }
 
-    // construct the final header array for the new sheet
-    const relevantApiHeaders = relevantApiIndices.map(index => adminApiHeaders[index]);
-    const finalHeaders = [...finalFixedHeaders, ...relevantApiHeaders];
+    // determine the set of columns to keep 
+    const indicesToDrop = [];
+    if (adminLinksIndex !== -1) indicesToDrop.push(adminLinksIndex); // Always drop Admin Links
+    
+    // add link column indices that failed the check
+    linkColumnDetails.filter(d => !d.check).forEach(d => indicesToDrop.push(d.index));
 
-    // instructor sheet creation and prep
+    // get indices for all columns A:AS (0 to 44)
+    const initialFixedIndices = Array.from({ length: fixedColumnCount }, (_, k) => k);
+
+    // filter out all columns we decided to drop
+    const fixedIndicesToKeep = initialFixedIndices.filter(index => !indicesToDrop.includes(index));
+
+    // determine which API/Grade columns are relevant
+    const courseCodesToMatch = relevantCourses[course] || [];
+    const relevantApiIndices = []; // indices RELATIVE to adminApiHeaders (0, 1, 2...)
+    for (let k = 0; k < adminApiHeaders.length; k++) {
+        if (courseCodesToMatch.includes(adminApiHeaders[k])) {
+            relevantApiIndices.push(k);
+        }
+    }
+    const relevantApiHeaders = relevantApiIndices.map(index => adminApiHeaders[index]);
+
+    // construct the final header array for the new sheet
+    const finalFixedHeaders = fixedIndicesToKeep.map(index => headers[index]);
+    const finalHeaders = [...finalFixedHeaders, ...relevantApiHeaders];
+    
+    // instructor sheet creation and prep 
     const newSpreadsheetName = `${semester} ${course} ASE Applicants - Instructor View`;
     let instSpreadsheet;
     if (instFolder.getFilesByName(newSpreadsheetName).hasNext()) {
@@ -639,56 +729,62 @@ function generateInstructorSheets() {
       }
     }
 
-    // filter and reconstruct data
+    // loop through courseAdminRecords to construct final rows ---
     const destSheet = instSpreadsheet.getSheets()[0];
     const filteredData = [finalHeaders];
 
-    for (let j = 1; j < adminData.length; j++) {
-      const row = adminData[j];
-      const classesRaw = row[classesIndex];
-      const linksRaw = row[linksIndex];
-      
-      if (!classesRaw) continue;
-
-      // check if any of the classes in the row match the 'course' variable
-      const classes = classesRaw.toString().split(';').map(c => c.trim());
-      const matchIndex = classes.indexOf(course);
-
-      if (matchIndex !== -1) {
-        const rowToFilter = [...row]; // copy the original row
-
-        // process "Instructor Links" and "Classes" to keep only the relevant data
-        const links = linksRaw.toString().split('\n');
-        rowToFilter[linksIndex] = links[matchIndex];
-        const cApplied = classesRaw.toString().split(';');
-        rowToFilter[classesIndex] = cApplied[matchIndex];
-
-        // get the fixed part of the row (A-AQ, indices 0-42)
-        let fixedRow = rowToFilter.slice(0, fixedColumnCount);
+    for (const record of courseAdminRecords) {
+        const originalRow = record.row;
+        const matchIndex = record.matchIndex;
         
-        // remove the Admin Links column if it existed in the fixed section
-        if (adminLinksFixedIndex !== -1) {
-            fixedRow.splice(adminLinksFixedIndex, 1); 
+        // create a temporary row copy for processing the cell content
+        const rowToProcess = [...originalRow];
+        
+        // update "Classes" column (keep only the matched class)
+        try {
+            const classes = String(rowToProcess[classesIndex]).split(';');
+            rowToProcess[classesIndex] = classes[matchIndex].trim();
+        } catch (e) {
+            rowToProcess[classesIndex] = originalRow[classesIndex]; // keep original if issue
+            Logger.log(`Error processing classes for applicant: ${e.message}`);
         }
 
+        // update Link columns (keep only the matched link)
+        for (const linkCol of linkColumnDetails) {
+            const linkIndex = linkCol.index;
+            const linkCellContent = rowToProcess[linkIndex];
+            
+            if (linkCellContent) {
+                const links = String(linkCellContent).split('\n');
+                // set the cell content to just the link relevant to this course
+                rowToProcess[linkIndex] = links[matchIndex] ? links[matchIndex].trim() : ''; 
+            } else {
+                 rowToProcess[linkIndex] = ''; 
+            }
+        }
+
+        // construct the new row by picking columns to keep
+        
+        // get the kept fixed/link part of the row
+        let newRow = fixedIndicesToKeep.map(index => rowToProcess[index]);
+
         // get the dynamic API/Grade data
-        const apiRow = rowToFilter.slice(fixedColumnCount); // AR onwards
-        const relevantApiRow = relevantApiIndices.map(index => apiRow[index]); // Select only relevant columns
+        const apiRow = rowToProcess.slice(fixedColumnCount); // AR onwards
+        const relevantApiRow = relevantApiIndices.map(index => apiRow[index]); // select only relevant columns
         
         // combine the fixed and dynamic parts
-        const newRow = [...fixedRow, ...relevantApiRow];
+        newRow = [...newRow, ...relevantApiRow];
         
         filteredData.push(newRow);
-      }
     }
 
+    // write filteredData to sheet and create filter view 
     let numRows = 0;
     let numCols = 0;
     if (filteredData.length > 0) {
-      const dest = instSpreadsheet.getSheets()[0];
       numRows = filteredData.length;
       numCols = filteredData[0].length;
-      dest.getRange(1, 1, numRows, numCols).setValues(filteredData);
+      destSheet.getRange(1, 1, numRows, numCols).setValues(filteredData);
     }
     // create filter view for applicants' top choice
     if (numRows > 1 && numCols > 0) {

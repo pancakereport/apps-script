@@ -9,8 +9,8 @@ This Apps Script combines information from the ALR, the supplemental application
 
 1. Download Applicant List Report from ACG and upload to Google Sheets. Name the sheet “ALR”.
 2. In the same Spreadsheet, create another sheet named “Information” with the following:
-Column A: Course Names; Column B: Course IDs from ACG (used to construct instructor links); Column C: Emails of Instructors who will have “Instructor View Spreadsheets” shared with them; Column D: Term from ACG (used to construct instructor links); Column E: Semester (used to name folders and spreadsheets).
-    ![sheet named “Information” with the following: Column A: Course Names; Column B: Course IDs from ACG; Column C: Emails of Instructors who will have “Instructor View Spreadsheets” shared with them; Column D: Term from ACG ; Column E: Semester](images/information-sheet.png)
+Column A: Course Names; Column B: Course IDs from ACG (used to construct instructor links); Column C: Emails of Instructors who will have “Instructor View Spreadsheets” shared with them; Column D: Term from ACG (used to construct instructor links); Column E: Semester (used to name folders and spreadsheets); Column F: ta job IDs from ACG; Column G: tutor job IDs from ACG; Column H: reader job IDs from ACG.
+    ![sheet named “Information” with the following: Column A: Course Names; Column B: Course IDs from ACG; Column C: Emails of Instructors who will have “Instructor View Spreadsheets” shared with them; Column D: Term from ACG; Column E: Semester; Column F: ta job IDs from ACG; Column G: tutor job IDs from ACG; Column H: reader job IDs from ACG](images/information-sheet.png)
 3. Upload or link Supplemental Application data to another sheet in the same Google Spreadsheet named “Supplemental”. You should now have the following sheets within one Google Sheet Document: "ALR," "Information," "Supplemental".
 4. Place the [Apps Script](combine-data.js) in the spreadsheet you've been working on. To access Apps Script, click Extensions -> Apps Script. 
 5. While still in the Apps Script editor, enable the Google Sheets API by clicking Services -> Add a Service. Choose "Google Sheets API" and click "Add".
