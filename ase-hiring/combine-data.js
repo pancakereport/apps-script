@@ -253,7 +253,7 @@ function fetchEnrollmentData(studentId) {
     return null;
   }
   // api information
-  const url = `https://gateway.api.berkeley.edu/uat/sis/v3/enrollments/students/${studentId}?primary-only=true`;
+  const url = `https://gateway.api.berkeley.edu/sis/v3/enrollments/students/${studentId}?primary-only=true`;
   const SCRIPT_PROPS = PropertiesService.getScriptProperties();
   const app_id = SCRIPT_PROPS.getProperty('app_id');
   const app_key = SCRIPT_PROPS.getProperty('app_key');
