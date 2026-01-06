@@ -90,6 +90,14 @@ function generateReviewLinks() {
     for (const courseName of courseNames) {
       const ids = courseMap.get(courseName);
 
+      // Check if 'ids' is defined before accessing its properties
+      if (!ids) {
+        instructorTaLinks.push(`ERROR: Course '${courseName}' not found in Information sheet.`);
+        instructorTutorLinks.push(`ERROR: Course '${courseName}' not found in Information sheet.`);
+        instructorReaderLinks.push(`ERROR: Course '${courseName}' not found in Information sheet.`);
+        continue; // Skip to the next course name
+      }
+
       if (ids.taId) {
         const instructorURL = `https://deptapps.coe.berkeley.edu/ase/all/review/${ids.taId}/applicants/${applicantId}?term=${term}`;
         instructorTaLinks.push(instructorURL);
