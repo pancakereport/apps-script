@@ -11,9 +11,19 @@ function onOpen() {
 function testSIDs() {
   Logger.log("Gathering Data for SIDs on Sheet 'Test SIDs.'");
   const sids = readSIDs("Test SIDs", verbose = true);
+  const sidMap = {};
   for (const sid of sids) {
-    fetchEnrollmentData(sid, verbose = true);
+    const enrollmentData = fetchEnrollmentData(sid, verbose = false);
+    const studentData = fetchStudentData(sid, verbose = false);
+    // flatten data from the two APIs
+    sidMap[sid] = {
+
+      ...enrollmentData,
+      ...studentData
+    };
   }
+  Logger.log("SID Map: " + JSON.stringify(sidMap, null, 2));
+  writeOutput(sidMap, "Test SIDs Output");
 }
 
 // read in SIDs
@@ -49,7 +59,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
     Logger.log("You appear to have passed in an empty SID (enrollment API). Further investigation may be needed.")
     return null;
   }
-  const url = `https://gateway.api.berkeley.edu/uat/sis/v3/enrollments/students/${studentId}?primary-only=true&enrolled-only=true`;
+  const url = `https://gateway.api.berkeley.edu/sis/v3/enrollments/students/${studentId}?primary-only=true&enrolled-only=true`;
   const scriptProps = PropertiesService.getScriptProperties();
   const app_id = scriptProps.getProperty('APP_ID_ENROLLMENT');
   const app_key = scriptProps.getProperty('APP_KEY_ENROLLMENT');
@@ -102,15 +112,15 @@ function fetchEnrollmentData(studentId, verbose = false) {
       });
 
       if (verbose) {
-        Logger.log(`Mapping for ${studentId}: ${JSON.stringify(resultMapping)}`);
+        Logger.log(`Mapping for ${studentId}: ` + JSON.stringify(resultMapping, null, 2));
       }
       return resultMapping;
     } else {
-      Logger.log(`API Error for ${studentId}: HTTP ${responseCode}`);
+      Logger.log(`Enrollment API Error for ${studentId}: HTTP ${responseCode}`);
       return null;
     }
   } catch (error) {
-    Logger.log(`API Exception for ${studentId}: ${error.toString()}`);
+    Logger.log(`Enrollment API Exception for ${studentId}: ${error.toString()}`);
     return null;
   }
 }
@@ -121,16 +131,10 @@ function fetchStudentData(studentId, verbose = false) {
     Logger.log("You appear to have passed in an empty SID (student API). Further investigation may be needed.")
     return null;
   }
-  // TODO URL
-  const url = ``;
+  const url = `https://gateway.api.berkeley.edu/sis/v2/students/${studentId}?id-type=student-id&inc-acad=true&inc-cntc=false&inc-regs=false&inc-attr=false&inc-dmgr=false&inc-work=false&inc-dob=false&inc-gndr=false&affiliation-status=ALL&inc-completed-programs=true&inc-inactive-programs=true`;
   const scriptProps = PropertiesService.getScriptProperties();
   const app_id = scriptProps.getProperty('APP_ID_STUDENT');
   const app_key = scriptProps.getProperty('APP_KEY_STUDENT');
-  // REMOVE IN THE FUTURE
-  if (app_id === app_key) {
-    Logger.log("Student API app_id and app_key have not yet been added to the Script Properties");
-    return;
-  }
   const options = {
     'method': 'get',
     'headers': {
@@ -140,5 +144,98 @@ function fetchStudentData(studentId, verbose = false) {
     },
     'muteHttpExceptions': true
   };
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    if (responseCode === 200) {
+      const json = JSON.parse(response.getContentText());
+      const student = json.apiResponse.response;
+      let studentData = {
+        gpa: null,
+        egt: null,
+        fromDate: null
+      };
+      if (student.affiliations && Array.isArray(student.affiliations)) {
+        const ugAffiliation = student.affiliations.find(aff => aff.type?.code === "UNDERGRAD");
+        if (ugAffiliation) {
+          studentData.fromDate = ugAffiliation.fromDate || null;
+        }
+      }
+      
+      if (student.academicStatuses && Array.isArray(student.academicStatuses)) {
+        const undergradCareer = student.academicStatuses.find(status => 
+          status.studentCareer?.academicCareer?.code === "UGRD"
+        );
+        if (undergradCareer) {
+          studentData.gpa = undergradCareer.cumulativeGPA?.average || null;
+          // this may need to be double checked - doesn't work for silas's SID (but they're graduated so it's not the typical usecase)
+          try {
+            studentData.egt = undergradCareer.studentPlans[0].expectedGraduationTerm?.id || null;
+          } catch (error) {       
+          }
+        }
+      } else {
+        Logger.log(`Could not find undergraduate enrollment for ${studentId}. 
+        No GPA, EGT, or From Date will berecorded.`)
+      }
+      if (verbose) {
+        Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentData, null, 2));
+      }
+      return studentData;
+    } else {
+      Logger.log(`Student API Error for ${studentId}: HTTP ${responseCode}`);
+      return null;
+    }
+  } catch (error) {
+    Logger.log(`Student API Exception for ${studentId}: ${error.toString()}`);
+    return null;
+  }
 }
 
+// write output to sheet
+function writeOutput(sidMap, outputSheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let outputSheet = ss.getSheetByName(outputSheetName);
+  if (outputSheet) {
+    outputSheet.clear();
+  } else {
+    outputSheet = ss.insertSheet(outputSheetName);
+  }
+  // Identify all unique keys across all students
+  const allKeys = new Set();
+  const sids = Object.keys(sidMap);
+  sids.forEach(sid => {
+    Object.keys(sidMap[sid]).forEach(key => allKeys.add(key));
+  });
+
+  // Define priority headers and order remaining headers alphabetically
+  const priorityHeaders = ["SID", "gpa", "fromDate", "egt", "Taken R&C"];
+  const otherHeaders = Array.from(allKeys)
+    .filter(key => !priorityHeaders.includes(key))
+    .sort();
+
+  const finalHeaders = priorityHeaders.concat(otherHeaders);
+  outputSheet.appendRow(finalHeaders);
+
+  // Map sidMap data into rows based on finalHeaders
+  const rows = sids.map(sid => {
+    const studentData = sidMap[sid];
+    return finalHeaders.map(header => {
+      if (header === "SID") {
+        return sid;
+      }
+      // Check if value exists, handle booleans for R&C Taken
+      const val = studentData[header];
+      if (val === undefined || val === null) return "";
+      return val;
+    });
+  });
+  // Write to the output sheet
+  if (rows.length > 0) {
+    outputSheet.getRange(2, 1, rows.length, finalHeaders.length).setValues(rows);
+  }
+
+  // Formatting: Bold headers and freeze top row
+  outputSheet.getRange(1, 1, 1, finalHeaders.length).setFontWeight("bold");
+  outputSheet.setFrozenRows(1);
+}
