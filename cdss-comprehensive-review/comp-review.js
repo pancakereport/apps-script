@@ -3,8 +3,6 @@ function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Actions')
     .addItem('Test SIDs', 'testSIDs')
-    .addSeparator()
-    .addItem('Run All SIDs', 'runSIDs')
     .addToUi();
 }
 
@@ -80,6 +78,8 @@ function fetchEnrollmentData(studentId, verbose = false) {
     if (responseCode === 200) {
       const json = JSON.parse(response.getContentText());
       const enrollments = json?.apiResponse?.response?.enrollmentsByStudent?.studentEnrollments;
+      // Start high to find the minimum term
+      let minTerm = Infinity; 
       // Imperfect check for if student completed a R&C course
       const resultMapping = {
         "Taken R&C": enrollments.some(e => e?.classSection?.class?.course?.catalogNumber?.prefix === "R")
@@ -87,15 +87,25 @@ function fetchEnrollmentData(studentId, verbose = false) {
       // Group enrollments by Course Display Name 
       const coursesMap = {};
       enrollments.forEach(e => {
+        const termId = parseInt(e?.classSection?.class?.session?.term?.id);
+        const grade = e?.grades?.[0]?.mark;
         const courseName = e?.classSection?.class?.course?.displayName;
+
+        // Update minTerm is grade exists
+        if (termId && grade && termId < minTerm) {
+          minTerm = termId;
+        }
+
         if (!courseName) return;
         
         if (!coursesMap[courseName]) coursesMap[courseName] = [];
         coursesMap[courseName].push({
-          termId: parseInt(e?.classSection?.class?.session?.term?.id || 0),
-          grade: e?.grades?.[0]?.mark || "N/A"
+          termId: parseInt(termId || 0),
+          grade: grade || "N/A"
         });
       });
+
+      resultMapping["Admit Term"] = minTerm === Infinity ? "N/A" : minTerm;
 
       // For each course, sort by termId (descending) and take the top 3
       // double check that termIds ARE ordered and that the largest numbers are the most recent
@@ -105,9 +115,11 @@ function fetchEnrollmentData(studentId, verbose = false) {
         for (let i = 0; i < Math.min(sortedHistory.length, 3); i++) {
           const suffix = i + 1; // 1, 2, or 3
           const record = sortedHistory[i];
-          
-          resultMapping[`${courseName} Semester ${suffix}`] = record.termId;
-          resultMapping[`${courseName} Grade ${suffix}`] = record.grade;
+          // Format: "COURSE NAME | Attempt Number | Field" 
+          // used to sort alphanumerically so we always get name, semester, then grade
+          resultMapping[`${courseName} | ${suffix} | 1 Name`] = courseName;
+          resultMapping[`${courseName} | ${suffix} | 2 Semester`] = record.termId;
+          resultMapping[`${courseName} | ${suffix} | 3 Grade`] = record.grade;
         }
       });
 
@@ -125,7 +137,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
   }
 }
 
-// get admit term, gpa, and egt
+// get gpa, and egt
 function fetchStudentData(studentId, verbose = false) {
   if (!studentId) {
     Logger.log("You appear to have passed in an empty SID (student API). Further investigation may be needed.")
@@ -153,14 +165,7 @@ function fetchStudentData(studentId, verbose = false) {
       let studentData = {
         gpa: null,
         egt: null,
-        fromDate: null
       };
-      if (student.affiliations && Array.isArray(student.affiliations)) {
-        const ugAffiliation = student.affiliations.find(aff => aff.type?.code === "UNDERGRAD");
-        if (ugAffiliation) {
-          studentData.fromDate = ugAffiliation.fromDate || null;
-        }
-      }
       
       if (student.academicStatuses && Array.isArray(student.academicStatuses)) {
         const undergradCareer = student.academicStatuses.find(status => 
@@ -176,7 +181,7 @@ function fetchStudentData(studentId, verbose = false) {
         }
       } else {
         Logger.log(`Could not find undergraduate enrollment for ${studentId}. 
-        No GPA, EGT, or From Date will berecorded.`)
+        No GPA or EGT will berecorded.`)
       }
       if (verbose) {
         Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentData, null, 2));
@@ -209,7 +214,7 @@ function writeOutput(sidMap, outputSheetName) {
   });
 
   // Define priority headers and order remaining headers alphabetically
-  const priorityHeaders = ["SID", "gpa", "fromDate", "egt", "Taken R&C"];
+  const priorityHeaders = ["SID", "gpa", "Admit Term", "egt", "Taken R&C"];
   const otherHeaders = Array.from(allKeys)
     .filter(key => !priorityHeaders.includes(key))
     .sort();
@@ -232,8 +237,19 @@ function writeOutput(sidMap, outputSheetName) {
   });
   // Write to the output sheet
   if (rows.length > 0) {
-    outputSheet.getRange(2, 1, rows.length, finalHeaders.length).setValues(rows);
+    const range = outputSheet.getRange(2, 1, rows.length, finalHeaders.length);
+    // Create an array of formats for the header row
+    // "@" is Plain Text, null is "Automatic/Default"
+    const formats = [finalHeaders.map(header => {
+      // anything that looks like a Semester ID should be plain text to prevent Date conversion
+      if (header === "Admit Term" || header === "egt" || header.includes("Semester")) {
+        return "@";
+      }
+      return null; 
+    })];
+    range.setValues(rows);
   }
+  
 
   // Formatting: Bold headers and freeze top row
   outputSheet.getRange(1, 1, 1, finalHeaders.length).setFontWeight("bold");
