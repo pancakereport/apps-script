@@ -80,9 +80,9 @@ function fetchEnrollmentData(studentId, verbose = false) {
       const enrollments = json?.apiResponse?.response?.enrollmentsByStudent?.studentEnrollments;
       // Start high to find the minimum term
       let minTerm = Infinity; 
-      // Imperfect check for if student completed a R&C course
+      // Determine how many R&C courses a student has taken
       const resultMapping = {
-        "Taken R&C": enrollments.some(e => e?.classSection?.class?.course?.catalogNumber?.prefix === "R")
+        "Taken R&C": enrollments.filter(e => e?.classSection?.class?.course?.catalogNumber?.prefix === "R").length
       };
       // Group enrollments by Course Display Name 
       const coursesMap = {};
