@@ -116,10 +116,10 @@ function fetchEnrollmentData(studentId, verbose = false) {
           const suffix = i + 1; // 1, 2, or 3
           const record = sortedHistory[i];
           // Format: "COURSE NAME | Attempt Number | Field" 
-          // used to sort alphanumerically so we always get name, semester, then grade
+          // used to sort alphanumerically so we always get course name, grade, then semester
           resultMapping[`${courseName} | ${suffix} | 1 Name`] = courseName;
-          resultMapping[`${courseName} | ${suffix} | 2 Semester`] = record.termId;
-          resultMapping[`${courseName} | ${suffix} | 3 Grade`] = record.grade;
+          resultMapping[`${courseName} | ${suffix} | 3 Semester`] = record.termId;
+          resultMapping[`${courseName} | ${suffix} | 2 Grade`] = record.grade;
         }
       });
 
