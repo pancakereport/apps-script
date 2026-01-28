@@ -112,17 +112,29 @@ function cleanCourses(dataMap) {
 function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
+  // "DATA/STAT" -> "DATA"
+  clean = clean.replace(/^DATA\/STAT\s?/, "DATA ");
 
   // ensure space between department and number while accounting
   // for cross listed courses (C) and online (W)
-  clean = clean.replace(/([A-Z]+)\s*([CW]?\d.*)/, "$1 $2");
+  clean = clean.replace(/([A-Z]+)\s*([CW]?\d[A-Z0-9]*).*/, "$1 $2");
 
   // common department shorthand
-  clean = clean.replace(/^CS\s/, "COMPSCI ");
-  clean = clean.replace(/^COMP SCI\s/, "COMPSCI ");
-  clean = clean.replace(/^EE\s/, "EECS ");
-  clean = clean.replace(/^SOCIOLOGY\s/, "SOCIOL ");
-  clean = clean.replace(/^STATISTICS\s/, "STAT ");
+  const mapping = {
+    "^CS\\b": "COMPSCI",
+    "^COMP SCI\\b": "COMPSCI",
+    "^EE\\b": "EECS",
+    "^SOCIOLOGY\\b": "SOCIOL",
+    "^STATISTICS\\b": "STAT"
+  };
+
+  for (let pattern in mapping) {
+    let re = new RegExp(pattern, "i");
+    if (re.test(clean)) {
+      clean = clean.replace(re, mapping[pattern]);
+      break; 
+    }
+  }
 
   return clean;
 }
