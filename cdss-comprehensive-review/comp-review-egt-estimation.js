@@ -7,18 +7,18 @@ function onOpen() {
 }
 
 function fullFunction() {
-  const dataMap = getInput(false, true); // make both false later
+  const dataMap = getInput(false);
   cleanCourses(dataMap);
-  updateSheetWithCleanedData(dataMap); // remove later
   // verifyInfo(dataMap);
+  writeToSheet(dataMap, "Intermediate Processed Data");
 }
 
-/* Read the input data
-   Returns a map of {SID: { identifying_info: {col: val, ...}, 
-                            course_info: {col: val, ...}}}
-  To be used by later functions
+/** Read the input data
+ * Returns a map of {SID: { identifying_info: {col: val, ...}, 
+ *                         course_info: {col: val, ...}}}
+ * To be used by later functions
 */
-function getInput(verbose=false, write=false) {
+function getInput(verbose=false) {
   // read data
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const inputSheet = ss.getSheetByName("Input"); 
@@ -42,7 +42,7 @@ function getInput(verbose=false, write=false) {
   // list of headers to keep in identifying_info
   const keepHeaders = [
     "SID", "FY vs TR", "1st Sem", "1st Sem_5_TEXT", "EGT", "EGT_12_TEXT", 
-    "Current College", "Current Major", "Change or Add", "CDSS Major", 
+    "Current College", "Current Major", "Change or Add",
     "Major Ranking_1", "Major Ranking_2", "Major Ranking_3"
   ];
 
@@ -75,22 +75,51 @@ function getInput(verbose=false, write=false) {
       idInfo["EGT"] = idInfo["EGT_12_TEXT"];
     }
     delete idInfo["EGT_12_TEXT"]; 
+    // pivot Major Ranking
+    const majorMap = {
+      "Major Ranking_1": "Computer Science",
+      "Major Ranking_2": "Data Science",
+      "Major Ranking_3": "Statistics"
+    };
+    idInfo["First Choice Major"] = "";
+    idInfo["Second Choice Major"] = "";
+    idInfo["Third Choice Major"] = "";
+
+    Object.keys(majorMap).forEach(rankKey => {
+      const rankValue = idInfo[rankKey];
+      const majorName = majorMap[rankKey];
+
+      if (rankValue == 1) idInfo["First Choice Major"] = majorName;
+      if (rankValue == 2) idInfo["Second Choice Major"] = majorName;
+      if (rankValue == 3) idInfo["Third Choice Major"] = majorName;
+      
+      delete idInfo[rankKey];
+    });
+  });
+  verbose && console.log(JSON.stringify(dataMap, null, 2));
+  return dataMap;
+}
+
+function writeToSheet(dataMap, sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+  sheet.clear();
+
+  const sids = Object.keys(dataMap);
+  if (sids.length === 0) return;
+
+  // get headers dynamically from the first student
+  const sample = dataMap[sids[0]];
+  const headers = [...Object.keys(sample.identifying_info), ...Object.keys(sample.course_info)];
+
+  // dataMap -> 2D Array
+  const rows = sids.map(sid => {
+    const student = dataMap[sid];
+    return headers.map(h => student.identifying_info[h] ?? student.course_info[h] ?? "");
   });
 
-  // output to a new sheet
-  if (write) {
-    let outputSheet = ss.getSheetByName("Intermediate Processed Data");
-    if (!outputSheet) {
-      outputSheet = ss.insertSheet("Intermediate Processed Data");
-    } else {
-      outputSheet.clear(); // clear old data before writing fresh results
-    }
-    outputSheet.getRange(1, 1, 1, updatedHeaders.length).setValues([updatedHeaders]);
-    outputSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
-
-    verbose && console.log(JSON.stringify(dataMap, null, 2));
-  }
-  return dataMap;
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
+  sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
 }
 
 // students enter their course names, these need to be cleaned for
@@ -149,51 +178,20 @@ function normalizeCourseName(name) {
   return clean;
 }
 
-function updateSheetWithCleanedData(dataMap) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Intermediate Processed Data");
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  
-  const sidIndex = headers.indexOf("SID");
-  
-  // skip headers
-  const updatedRows = data.slice(1).map(row => {
-    const sid = row[sidIndex];
-    const studentData = dataMap[sid];
-    
-    if (!studentData) return row; // skip if SID not in map
-
-    // create a new row based on the cleaned data in the map
-    return headers.map(header => {
-      // check if the value exists in course_info or identifying_info
-      if (studentData.course_info.hasOwnProperty(header)) {
-        return studentData.course_info[header];
-      } else if (studentData.identifying_info.hasOwnProperty(header)) {
-        return studentData.identifying_info[header];
-      }
-      return ""; // Fallback for columns not in map
-    });
-  });
-
-  // write the cleaned 2D array back to the sheet starting at row 2
-  sheet.getRange(2, 1, updatedRows.length, headers.length).setValues(updatedRows);
-}
-
-/* Verify information in dataMap using SID
-   - 1st Sem
-   - EGT
-   - CGPA 
-   - (maybe) Current College
-   - (maybe) Current Major
-   - Courses if any of course, grade, or sem don't line up, flag
-     excluding transfer courses and test scores
-  
-  Returns dataMap with a new value:
-   {SID: { identifying_info: {col: val, ...}, 
-          course_info: {col: val, ...},
-          unable_to_verify: [col1, col2, ...]}}
-*/
+/** Verify information in dataMap using SID
+ * - 1st Sem
+ * - EGT
+ * - CGPA 
+ * - (maybe) Current College
+ * - (maybe) Current Major
+ * - Courses if any of course, grade, or sem don't line up, flag
+ *   excluding transfer courses and test scores
+ * 
+ * Returns dataMap with a new value:
+ * {SID: { identifying_info: {col: val, ...}, 
+ *         course_info: {col: val, ...},
+ *         unable_to_verify: [col1, col2, ...]}}
+ */ 
 function verifyInfo(dataMap) {
 
 }
