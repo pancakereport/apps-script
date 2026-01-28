@@ -43,7 +43,7 @@ function getInput(verbose=false, write=false) {
   const keepHeaders = [
     "SID", "FY vs TR", "1st Sem", "1st Sem_5_TEXT", "EGT", "EGT_12_TEXT", 
     "Current College", "Current Major", "Change or Add", "CDSS Major", 
-    "Major Ranking_1", "Major Ranking_2", "Major Ranking_3", "1st DE", "2nd DE"
+    "Major Ranking_1", "Major Ranking_2", "Major Ranking_3"
   ];
 
   // SID Map with partitioned data - identifying data and data relating to courses
@@ -65,6 +65,16 @@ function getInput(verbose=false, write=false) {
         dataMap[sid].identifying_info[header] = val;
       }
     });
+    // handle when response is "other" by filling in their text response
+    const idInfo = dataMap[sid].identifying_info;
+    if (/other/i.test(idInfo["1st Sem"])) {
+      idInfo["1st Sem"] = idInfo["1st Sem_5_TEXT"];
+    }
+    delete idInfo["1st Sem_5_TEXT"]; 
+    if (/other/i.test(idInfo["EGT"])) {
+      idInfo["EGT"] = idInfo["EGT_12_TEXT"];
+    }
+    delete idInfo["EGT_12_TEXT"]; 
   });
 
   // output to a new sheet
@@ -171,8 +181,8 @@ function updateSheetWithCleanedData(dataMap) {
 }
 
 /* Verify information in dataMap using SID
-   - 1st Sem / 1st Sem_5_TEXT
-   - EGT / EGT_12_TEXT
+   - 1st Sem
+   - EGT
    - CGPA 
    - (maybe) Current College
    - (maybe) Current Major
