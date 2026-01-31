@@ -185,7 +185,6 @@ function normalizeCourseName(name) {
   // common department shorthand
   const mapping = {
     "^CS\\b": "COMPSCI",
-    "^COMP SCI\\b": "COMPSCI",
     "^EE\\b": "EECS",
     "^SOCIOLOGY\\b": "SOCIOL",
     "^STATISTICS\\b": "STAT",
