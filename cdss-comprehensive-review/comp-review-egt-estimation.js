@@ -461,3 +461,41 @@ function verifyInfo(dataMap, verbose = false) {
 
   return dataMap;
 }
+
+function studentPlanFlags(dataMap) {
+  const sids = Object.keys(dataMap);
+
+  sids.forEach(sid => {
+    dataMap[sid].predicted_egt_flags = [];
+    const idInfo = dataMap[sid].identifying_info;
+    const courseInfo = dataMap[sid].course_info;
+    const appEGT = parseInt(idInfo['EGT']);
+    
+    const courseKeys = Object.keys(courseInfo);
+    let hasSummer = false;
+    let hasLateCourses = false;
+
+    courseKeys.forEach(key => {
+      if (key.toLowerCase().includes("sem")) {
+        const termVal = parseInt(courseInfo[key]);
+        if (isNaN(termVal)) return;
+        // check for summer (ends in 5)
+        if (termVal.toString().endsWith("5")) {
+          hasSummer = true;
+        }
+        // check for courses planned AFTER EGT
+        if (!isNaN(appEGT) && termVal > appEGT) {
+          hasLateCourses = true;
+        }
+      }
+    });
+
+    if (hasSummer) {
+      dataMap[sid].predicted_egt_flags.push("Summer");
+    }
+    
+    if (hasLateCourses) {
+      dataMap[sid].predicted_egt_flags.push("Student plan has terms after EGT");
+    }
+  });
+}
