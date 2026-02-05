@@ -7,9 +7,11 @@ function onOpen() {
 }
 
 function fullFunction() {
+  const currSem = 2262;
   const dataMap = getInput(false);
   cleanCourses(dataMap);
   verifyInfo(dataMap);
+  studentPlanFlags(dataMap, currSem);
   writeToSheet(dataMap, "Intermediate Processed Data");
 }
 
@@ -108,21 +110,40 @@ function writeToSheet(dataMap, sheetName) {
   const sids = Object.keys(dataMap);
   if (sids.length === 0) return;
 
-  // get headers dynamically from the first student
-  const sample = dataMap[sids[0]];
-  const headers = [...Object.keys(sample.identifying_info), 
-                   ...Object.keys(sample.course_info),
-                   "Unable to Verify"];
+  // get headers dynamically considering all students
+  const headerSet = new Set();
+  sids.forEach(sid => {
+    const student = dataMap[sid];
+    Object.keys(student.identifying_info).forEach(k => headerSet.add(k));
+    Object.keys(student.course_info).forEach(k => headerSet.add(k));
+    // Add specific calculated flags
+    if (student.major_flags) {
+      Object.keys(student.major_flags).forEach(k => headerSet.add("Flag: " + k));
+    }
+  });
+
+  const headers = Array.from(headerSet);
+  headers.push("Predicted EGT Flags", "Unable to Verify");
 
   // dataMap -> 2D Array
   const rows = sids.map(sid => {
     const student = dataMap[sid];
+    const flags = student.major_flags || {};
     
     return headers.map(h => {
-      // special case for verification
-      if (h === "Unable to Verify") {
-        const issues = student.unable_to_verify || [];
-        return issues.join(", "); // Converts ["CGPA", "LD #10"] to "CGPA, LD #10"
+      // special case for verification and egt flags
+      if (h === "Unable to Verify") return (student.unable_to_verify || []).join(", ");
+      if (h === "Predicted EGT Flags") return (student.predicted_egt_flags || []).join(", ");
+
+      // major flags (prefixed with "Flag: " above)
+      if (h.startsWith("Flag: ")) {
+        const flagKey = h.replace("Flag: ", "");
+        const val = flags[flagKey];
+        // If the value is an object (like problem_grades), stringify it nicely
+        if (typeof val === 'object' && val !== null) {
+          return JSON.stringify(val); 
+        }
+        return val ?? "";
       }
       // standard columns
       return student.identifying_info[h] ?? student.course_info[h] ?? "";
@@ -240,6 +261,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
         const termId = parseInt(e?.classSection?.class?.session?.term?.id);
         const grade = e?.grades?.[0]?.mark;
         const courseName = e?.classSection?.class?.course?.displayName;
+        const units = e?.enrolledUnits?.taken;
 
         // Update minTerm is grade exists
         if (termId && grade && termId < minTerm) {
@@ -251,7 +273,8 @@ function fetchEnrollmentData(studentId, verbose = false) {
         if (!coursesMap[courseName]) coursesMap[courseName] = [];
         coursesMap[courseName].push({
           termId: parseInt(termId || 0),
-          grade: grade || "N/A"
+          grade: grade || "N/A",
+          units:  units || 0 
         });
       });
 
@@ -268,8 +291,9 @@ function fetchEnrollmentData(studentId, verbose = false) {
           // Format: "COURSE NAME | Attempt Number | Field" 
           // used to sort alphanumerically so we always get course name, grade, then semester
           resultMapping[`${courseName} | ${suffix} | 1 Name`] = courseName;
-          resultMapping[`${courseName} | ${suffix} | 3 Semester`] = record.termId;
+          resultMapping[`${courseName} | ${suffix} | 4 Semester`] = record.termId;
           resultMapping[`${courseName} | ${suffix} | 2 Grade`] = record.grade;
+          resultMapping[`${courseName} | ${suffix} | 3 Units`] = record.units;
         }
       });
 
@@ -288,6 +312,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
 }
 
 // helper function: get gpa and egt to verify
+// also get termsInAttendance
 function fetchStudentData(studentId, verbose = false) {
   if (!studentId) {
     Logger.log("You appear to have passed in an empty SID (student API). Further investigation may be needed.")
@@ -315,6 +340,7 @@ function fetchStudentData(studentId, verbose = false) {
       let studentData = {
         gpa: null,
         egt: null,
+        termsInAttendance: null
       };
       
       if (student.academicStatuses && Array.isArray(student.academicStatuses)) {
@@ -323,6 +349,7 @@ function fetchStudentData(studentId, verbose = false) {
         );
         if (undergradCareer) {
           studentData.gpa = undergradCareer.cumulativeGPA?.average || null;
+          studentData.termsInAttendance = undergradCareer.termsInAttendance || null;
           // this may need to be double checked - doesn't work for silas's SID (but they're graduated so it's not the typical usecase)
           try {
             studentData.egt = undergradCareer.studentPlans[0].expectedGraduationTerm?.id || null;
@@ -368,17 +395,26 @@ function semToId(sem) {
   return id;
 }
 
+// Helper to compare grades (A > B > C etc.)
+function getHighestGrade(gradeList) {
+  const points = { "A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-": 0.7, "F": 0, "W": -1, "NP": -1, "I": -1, "P": -1};
+  return gradeList.reduce((best, current) => {
+    return (points[current] || 0) > (points[best] || 0) ? current : best;
+  }, gradeList[0]);
+}
+
 /** Verify information in dataMap
  * - 1st Sem
  * - EGT
  * - CGPA 
- * - (maybe) Current College
- * - (maybe) Current Major
- * - Flag ourses if any of course (including X, N, W, or some C),
- *   grade, or sem don't line up, excluding transfer courses and test scores.
+ * - (TODO) Current College
+ * - (TODO) Current Major
+ * - Flag courses if any of course (including N, W, or some C),
+ *   grade doesn't line up with SIS, excluding transfer courses and test scores.
+ *   DOES NOT CHECK IF  SEMESTER LINES UP
  * 
  * Returns dataMap with a new key for each SID:
- * {SID: { identifying_info: {col: val, ...}, 
+ * {SID: { identifying_info: {col: val, ...}, now including 1st Sem ID and termsInAttendance
  *         course_info: {col: val, ...},
  *         unable_to_verify: [col1, col2, ...]}}
  */ 
@@ -401,8 +437,10 @@ function verifyInfo(dataMap, verbose = false) {
     const courseInfo = dataMap[sid].course_info;
 
     // VERIFY IDENTIFYING INFO
-    if (semToId(idInfo["1st Sem"]) != enrollmentTruth["Admit Term"]) {
-      verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which translates to ${semToId(idInfo["1st Sem"])} and doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
+    const firstSemId = semToId(idInfo["1st Sem"]);
+    dataMap[sid].identifying_info["1st Sem ID"] = firstSemId;
+    if (firstSemId != enrollmentTruth["Admit Term"]) {
+      verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which translates to ${firstSemId} and doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
       dataMap[sid].unable_to_verify.push("1st Sem");
     }
 
@@ -419,6 +457,9 @@ function verifyInfo(dataMap, verbose = false) {
       dataMap[sid].unable_to_verify.push("CGPA");
     }
 
+    // add termsInAttendance to identifying info
+    dataMap[sid].identifying_info['Terms in attendance'] = studentTruth.termsInAttendance;
+
     // VERIFY COURSE INFO
     Object.keys(courseInfo).forEach(colName => {
       if (colName.includes("grade")) {
@@ -434,24 +475,50 @@ function verifyInfo(dataMap, verbose = false) {
         const isTransfer = /transfer/i.test(courseName) || /transfer/i.test(semVal);
         if (gradeVal === "PL" || semVal === "Test Score" || isTransfer || !courseName) return;
 
-        // compare against API
-        const apiGradeKey = `${courseName} | 1 | 2 Grade`;
-        const apiGrade = enrollmentTruth[apiGradeKey];
+        // try to find a grade match across attempts 1, 2, and 3
+        let foundMatch = false;
+        let possibleGradesFound = [];
+        // loop through possible attempts
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          // check standard name and fall program for freshman
+          const variants = [
+            { grade: `${courseName} | ${attempt} | 2 Grade`, units: `${courseName} | ${attempt} | 3 Units` },
+            { grade: `X${courseName} | ${attempt} | 2 Grade`, units: `X${courseName} | ${attempt} | 3 Units` }
+          ];
 
-        // flag if API doesn't have the course OR grades don't match
-        if (!apiGrade) {
-          if (verbose) {
-            Logger.log(`${sid} - enrollment from API:`);
-            Logger.log(JSON.stringify(enrollmentTruth, null, 2));
-            Logger.log(`${sid}: API doesn't have record of ${courseName} for requirement ${baseReqName}`)
+          for (const variant of variants) {
+            const apiGrade = enrollmentTruth[variant.grade];
+            if (apiGrade !== undefined && apiGrade !== null) {
+              const formattedApiGrade = apiGrade.toString().toUpperCase();
+              possibleGradesFound.push(formattedApiGrade);
+              
+              if (formattedApiGrade === gradeVal) {
+                foundMatch = true;
+                unitsFound = enrollmentTruth[variant.units] || 0;
+                break; // inner loop (variants)
+              }
+            }
           }
-          dataMap[sid].unable_to_verify.push(baseReqName);
-        } else if (apiGrade.toString().toUpperCase() !== gradeVal.toString().toUpperCase()) {
+          if (foundMatch) break; // outter loop (attempts)
+        }
+
+        // record units (0 if course not found)
+        dataMap[sid].course_info[baseReqName + " units"] = unitsFound;
+
+        // update dataMap based on findings
+        if (!foundMatch) {
           if (verbose) {
-            Logger.log(`${sid} - enrollment from API:`);
-            Logger.log(JSON.stringify(enrollmentTruth, null, 2));
-            Logger.log(`API (${apiGrade}) doesn't match student reported ${gradeVal}`)
+            Logger.log(`${sid}: API doesn't have record of ${courseName} for requirement ${baseReqName}. 
+              SIS saw: ${possibleGradesFound.join(', ') || 'Nothing'}`);
           }
+          // course not found in SIS
+          if (possibleGradesFound.length === 0) {
+            dataMap[sid].course_info[colName] = "NA";
+          // course found in SIS but grade didn't match student report
+          } else {
+            dataMap[sid].course_info[colName] = getHighestGrade(possibleGradesFound);
+          }
+          
           dataMap[sid].unable_to_verify.push(baseReqName);
         }
       }
@@ -461,40 +528,207 @@ function verifyInfo(dataMap, verbose = false) {
   return dataMap;
 }
 
-function studentPlanFlags(dataMap) {
+// student plan includes summer term(s) or term(s) 
+// after the EGT listed on the application
+function predictedEgtFlags(idInfo, courseInfo) {
+  const appEGT = parseInt(idInfo['EGT']);
+  const retval = [];
+
+  // identify all unique prefixes
+  const prefixes = [...new Set(Object.keys(courseInfo).map(k => k.replace(/(sem|grade|course)$/i, "")))];
+
+  // map prefixes to objects and filter for valid semester data
+  const terms = prefixes.map(p => ({
+    sem: parseInt(courseInfo[`${p}sem`]),
+    grade: courseInfo[`${p}grade`]
+  })).filter(t => !isNaN(t.sem));
+
+  // check if summer term or term after EGT
+  if (terms.some(t => t.sem % 10 === 5 && t.grade === "PL")) {
+    retval.push("Summer");
+  }
+  if (!isNaN(appEGT) && terms.some(t => t.sem > appEGT)) {
+    retval.push("Terms after application EGT");
+  }
+  return retval;
+}
+
+// checks for passing letter grades (or test scores) in
+// LD 5 + (LD 1 | LD 2 | LD 6)
+function meetsDSRequirementsBasic(courseInfo) {
+  gradesNotAccepted = ["P", "NP", "PL", "D+", "D-", "D", "F", "NA"]
+  if (gradesNotAccepted.includes(courseInfo["LD #5 DSc8/St20 grade"]) ) {
+    return false;
+  }
+  if (courseInfo["LD #1 Calc 1 grade"] != "PL" && 
+    !gradesNotAccepted.includes(courseInfo["LD #1 Calc 1 grade"])) {
+    return true;
+  } else if (courseInfo["LD #2 Calc 2 grade"] != "PL" && 
+    !gradesNotAccepted.includes(courseInfo["LD #2 Calc 2 grade"])) {
+    return true;
+  } else if (courseInfo["LD #6 CS 61A grade"] != "PL" && 
+    !gradesNotAccepted.includes(courseInfo["LD #6 CS 61A grade"])) {
+      return true;
+  } else {
+    return false;
+  }
+}
+
+function countReqDS(courseInfo, currSem) {
+  const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
+  const notLetterGrade = ["PL", "P", "NP", "NA"];
+  let total = 0;
+
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && lower_div.some(req => colName.startsWith(req))) {
+      const baseReqName = colName.replace(" course", "");
+      const gradeVal = courseInfo[baseReqName + " grade"];
+      const semVal = courseInfo[baseReqName + " sem"];
+      
+      if (semVal == currSem || !notLetterGrade.includes(gradeVal)) {
+        total += 1
+      }
+    }
+  });
+  return total;
+}
+
+function meetsDSRequirements(idInfo, courseInfo, currSem) {
+  if (!meetsDSRequirementsBasic(courseInfo)) return false;
+
+  const isTransfer = idInfo["FY vs TR"];
+  const termsInAttendance = idInfo["Terms in attendance"];
+  const numCompleted = countReqDS(courseInfo, currSem);
+  if (!isTransfer) { // first year admit
+    if (termsInAttendance < 3) { // first year
+      // basic + one additional course completed = 3 reqs
+      return numCompleted >= 3;
+    } else if (termsInAttendance < 5) { // second year
+      // basic + three additional courses = 5 reqs
+      return numCompleted >= 5;
+    } else if (termsInAttendance < 7) { // third year
+      // all reqs completed or in progress = 7 reqs
+      return numCompleted == 7;
+    } else if (termsInAttendance > 6) { // fourth year, beyond
+      return `Too many terms in attendance (${termsInAttendance} terms)`;
+    }
+  } else { // transfer
+    if (termsInAttendance == 6) { // new transfer
+      if (numCompleted == 7) {
+        return true;
+      } else {
+        return "Summer Course Required to complete LD req";
+      }
+    } else if (termsInAttendance == 7) { // continuing transfer
+      return numCompleted == 7;
+    } else if (termsInAttendance > 7) { // applying with 4+ semesters at UC Berkeley
+      return  `Too many terms in attendance (${termsInAttendance} terms)`;
+    } else { // this should never be reached, but just in case
+      return "Something weird is happening with terms in attendance";
+    }
+  }
+  return false;
+}
+
+// calculate GPA for courses in requirements
+function calculateMajorGPA(courseInfo, requirements) {
+  const pointVals = {"A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-":0.7, "F": 0};
+
+  let totalGradePoints = 0;
+  let earnedGradePoints = 0;
+
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("grade") && requirements.some(req => colName.startsWith(req))) {
+      const gradeVal = courseInfo[colName];
+      const baseReqName = colName.replace(" grade", "");
+      const unitsVal = courseInfo[baseReqName + " units"];
+      // end this iteration of forEach if no letter grade or units
+      if (pointVals[gradeVal] === undefined) return; 
+      if (isNaN(unitsVal) || unitsVal === 0) return;
+
+      totalGradePoints += unitsVal;
+      earnedGradePoints += unitsVal * pointVals[gradeVal];
+
+    }
+  })
+  if (totalGradePoints === 0) return "NA";
+  return (earnedGradePoints / totalGradePoints).toFixed(3);
+}
+
+// were any major requirements taken PNP or received below a C-?
+function identifyProblemGrades(courseInfo, requirements) {
+  // key: pnp or belowCMinus
+  // value: requirement where problem arises
+  const problemGrades = {
+    'pnp': [],
+    'Below C-': []
+  };
+  const pnp = ["P", "NP"];
+  const belowCMinus = ["D+", "D", "D-", "F"];
+
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && requirements.some(req => colName.startsWith(req))) {
+      const courseName = courseInfo[colName];
+      const baseReqName = colName.replace(" course", "");
+      const gradeVal = courseInfo[baseReqName + " grade"];
+      
+      if (pnp.includes(gradeVal)) {
+        problemGrades.pnp.push(colName + " - " + courseName);
+      } else if (belowCMinus.includes(gradeVal)) {
+        problemGrades['Below C-'].push(colName + " - " + courseName)
+      }
+    }
+  });
+  return problemGrades;
+}
+
+// return major GPA (SIS data)
+// check if any courses for major were taken P/NP
+// check if any courses for major receieved grade below C-
+// check if meets DS requirements if DS
+function majorFlags(idInfo, courseInfo, currSem) {
+  majorFlags = {};
+  // determine which majors the student is applying to
+  const majors = [idInfo['First Choice Major'], idInfo['Second Choice Major'], idInfo['Third Choice Major']];
+  // helper to check if any of the three major slots contain the target major
+  const hasMajor = (target) => majors.some(m => m && m.includes(target));
+  let requirements;
+  if (hasMajor("Data Science")) {
+    requirements = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10", "DS Upper Division"];
+    majorFlags.major_gpa_ds = calculateMajorGPA(courseInfo, requirements);
+    majorFlags.meets_ds_requirements = meetsDSRequirements(idInfo, courseInfo);
+    majorFlags.problem_grades_ds = identifyProblemGrades(courseInfo, requirements);
+  }
+  if (hasMajor("Computer Science")) {
+    requirements = ["LD #1", "LD #2", "LD #4", "LD #6", "LD #7", "LD #8", "LD #9", "CS Upper Division"];
+    majorFlags.major_gpa_cs = calculateMajorGPA(courseInfo, requirements);
+    majorFlags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
+  } 
+  if (hasMajor("Statistics")) {
+    requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
+    majorFlags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
+    majorFlags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
+  }
+  return majorFlags;
+}
+
+
+// what about units (too many, too few?) -> laura thinks not too big of a deal 
+// anything about gen ed?
+// flag for student plan doesn't meet major requirements, listed courses don't work
+function studentPlanFlags(dataMap, currSem) {
   const sids = Object.keys(dataMap);
 
   sids.forEach(sid => {
     dataMap[sid].predicted_egt_flags = [];
     const idInfo = dataMap[sid].identifying_info;
     const courseInfo = dataMap[sid].course_info;
-    const appEGT = parseInt(idInfo['EGT']);
-    
-    const courseKeys = Object.keys(courseInfo);
-    let hasSummer = false;
-    let hasLateCourses = false;
+    const unverifiedInfo = dataMap[sid].unable_to_verify;
 
-    courseKeys.forEach(key => {
-      if (key.toLowerCase().includes("sem")) {
-        const termVal = parseInt(courseInfo[key]);
-        if (isNaN(termVal)) return;
-        // check for summer (ends in 5)
-        if (termVal.toString().endsWith("5")) {
-          hasSummer = true;
-        }
-        // check for courses planned AFTER EGT
-        if (!isNaN(appEGT) && termVal > appEGT) {
-          hasLateCourses = true;
-        }
-      }
-    });
-
-    if (hasSummer) {
-      dataMap[sid].predicted_egt_flags.push("Summer");
-    }
-    
-    if (hasLateCourses) {
-      dataMap[sid].predicted_egt_flags.push("Student plan has terms after EGT");
-    }
+    dataMap[sid].predicted_egt_flags = predictedEgtFlags(idInfo, courseInfo);
+    dataMap[sid].major_flags = majorFlags(idInfo, courseInfo, currSem);
   });
 }
+
+// unnecessary but how to calculate "year"
+// Math.floor(currSem / 10) - Math.floor(firstSem / 10)
