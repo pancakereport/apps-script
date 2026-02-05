@@ -355,25 +355,31 @@ function fetchStudentData(studentId, verbose = false) {
       let studentData = {
         gpa: null,
         egt: null,
-        termsInAttendance: null
+        termsInAttendance: null,
+        majors: [],
+        colleges: []
       };
       
       if (student.academicStatuses && Array.isArray(student.academicStatuses)) {
+        // confirm an active undergraduate status
         const undergradCareer = student.academicStatuses.find(status => 
           status.studentCareer?.academicCareer?.code === "UGRD"
         );
         if (undergradCareer) {
           studentData.gpa = undergradCareer.cumulativeGPA?.average || null;
           studentData.termsInAttendance = undergradCareer.termsInAttendance || null;
-          // this may need to be double checked - doesn't work for silas's SID (but they're graduated so it's not the typical usecase)
-          try {
-            studentData.egt = undergradCareer.studentPlans[0].expectedGraduationTerm?.id || null;
-          } catch (error) {       
-          }
+          // record major, college for each major plan and egt for primary plan
+          undergradCareer.studentPlans.forEach(plan => {
+            if (!plan.academicPlan?.type?.code == "MAJ") return;
+            let isPrimary = planEntry.primary;
+            if (isPrimary) studentData.egt = primaryPlan.expectedGraduationTerm?.id || null;
+            studentData.majors.push(plan.academicPlan?.plan?.formalDescription);
+            studentData.colleges.push(plan.academicProgram?.academicGroup?.formalDescription) // not the closest but maybe i can do some rounding
+
+          });
         }
       } else {
-        Logger.log(`Could not find undergraduate enrollment for ${studentId}. 
-        No GPA or EGT will berecorded.`)
+        Logger.log(`Could not find undergraduate enrollment for ${studentId}. No GPA or EGT or termsInAttendance will be recorded.`)
       }
       if (verbose) {
         Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentData, null, 2));
