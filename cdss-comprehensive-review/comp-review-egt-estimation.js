@@ -497,7 +497,7 @@ function verifyInfo(dataMap, verbose = false) {
     });
 
     const reportedMajor = idInfo["Current Major"] || ""; // ex: "Economics,Statistics"
-    const actualMajor = enrollmentTruth.majors || []; // ex: ["Economics", "Statistics"]
+    const actualMajor = studentTruth.majors || []; // ex: ["Economics", "Statistics"]
     const actualCleanedM = actualMajor.map(normalize);
 
     // can every reported major be verified?
