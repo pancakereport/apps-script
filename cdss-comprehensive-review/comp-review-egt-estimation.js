@@ -273,15 +273,17 @@ function fetchEnrollmentData(studentId, verbose = false) {
       enrollments.forEach(e => {
         const termId = parseInt(e?.classSection?.class?.session?.term?.id);
         const grade = e?.grades?.[0]?.mark;
-        const courseName = e?.classSection?.class?.course?.displayName;
+        const displayName = e?.classSection?.class?.course?.displayName;
         const units = e?.enrolledUnits?.taken;
 
-        // Update minTerm is grade exists
+        // update minTerm if grade exists
         if (termId && grade && termId < minTerm) {
           minTerm = termId;
         }
 
-        if (!courseName) return;
+        // treat N and W course numbers the same as without
+        if (!displayName) return;
+        const courseName = displayName.replace(/[NW](?=\d)/i, ""); 
         
         if (!coursesMap[courseName]) coursesMap[courseName] = [];
         coursesMap[courseName].push({
