@@ -372,7 +372,7 @@ function fetchStudentData(studentId, verbose = false) {
           // record major, college for each major plan and egt for primary plan
           undergradCareer.studentPlans.forEach(plan => {
             if (!plan.academicPlan?.type?.code == "MAJ") return;
-            let isPrimary = planEntry.primary;
+            let isPrimary = plan.planEntry?.primary;
             if (isPrimary) studentData.egt = primaryPlan.expectedGraduationTerm?.id || null;
             studentData.majors.push(plan.academicPlan?.plan?.formalDescription);
             studentData.colleges.push(plan.academicProgram?.academicGroup?.formalDescription) // not the closest but maybe i can do some rounding
