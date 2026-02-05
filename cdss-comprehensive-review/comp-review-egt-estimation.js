@@ -486,8 +486,8 @@ function verifyInfo(dataMap, verbose = false) {
       .replace("&", "and")
       .replace(/[^a-z0-9]/g, ""); // remove everything but letters and numbers
 
-    const reportedColleges = idInfo["Current College"]; // ex: "College of Computing Data Science and Society (CDSS),College of Letters & Sciences (L&S)"
-    const actualColleges = studentTruth.colleges; // ex: ["College of Letters and Science", "Clg of Comp Data Sci & Society"]
+    const reportedColleges = idInfo["Current College"] || ""; // ex: "College of Computing Data Science and Society (CDSS),College of Letters & Sciences (L&S)"
+    const actualColleges = studentTruth.colleges || []; // ex: ["College of Letters and Science", "Clg of Comp Data Sci & Society"]
     const actualCleanedC = actualColleges.map(normalize);
 
     // can every reported college be verified?
@@ -496,15 +496,15 @@ function verifyInfo(dataMap, verbose = false) {
       return actualCleanedC.some(act => act.includes(cleanRep) || cleanRep.includes(act));
     });
 
-    const reportedMajor = idInfo["Current Major"]; // ex: "Economics,Statistics"
-    const actualMajor = enrollmentTruth.majors // ex: ["Economics", "Statistics"]
+    const reportedMajor = idInfo["Current Major"] || ""; // ex: "Economics,Statistics"
+    const actualMajor = enrollmentTruth.majors || []; // ex: ["Economics", "Statistics"]
     const actualCleanedM = actualMajor.map(normalize);
 
     // can every reported major be verified?
     const majorIsVerified = reportedMajor.split(",").every(rep => {
       const cleanMaj = normalize(rep);
       return actualCleanedM.some(act => act.includes(cleanMaj) || cleanMaj.includes(act));
-  });
+    });
 
     // add termsInAttendance to identifying info
     dataMap[sid].identifying_info['Terms in attendance'] = studentTruth.termsInAttendance;
