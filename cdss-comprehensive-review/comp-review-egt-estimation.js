@@ -201,20 +201,21 @@ function cleanCourses(dataMap) {
 function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
-  // "DATA/STAT" -> "DATA"
   clean = clean.replace(/^DATA\/STAT\s?/, "DATA ");
   clean = clean.replace(/^CS\/DATA\s?/, "DATA ");
   // in free response students might forget cross listed "C"
   clean = clean.replace(/^DATA\s?(?!C)(100|104|140)\b/, "DATA C$1");
+  // Remove N or W if they appear immediately before a digit, but ignore C
+  clean = clean.replace(/([A-Z]+)\s*[NW](\d)/, "$1 $2");
 
   // collapse spaces in department 
-  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[CWN]?\d)/, function(match) {
+  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[C]?\d)/, function(match) {
     return match.replace(/\s+/g, "");
   });
 
   // ensure space between department and number while accounting
-  // for cross listed courses (C) and online (W) and summer session not equivalent (N)
-  clean = clean.replace(/([A-Z]+)\s*([CWN]?\d[A-Z0-9]*).*/, "$1 $2");
+  // for cross listed courses (C) 
+  clean = clean.replace(/([A-Z]+)\s*([C]?\d[A-Z0-9]*).*/, "$1 $2");
 
   // common department shorthand
   const mapping = {
