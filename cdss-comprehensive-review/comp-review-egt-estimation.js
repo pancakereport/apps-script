@@ -500,14 +500,22 @@ function verifyInfo(dataMap, verbose = false) {
     const actualMajor = studentTruth.majors || []; // ex: ["Economics", "Statistics"]
     const actualCleanedM = actualMajor.map(normalize);
 
-    // can every reported major be verified?
-    const majorIsVerified = reportedMajor.split(",").every(rep => {
-      const cleanMaj = normalize(rep);
-      return actualCleanedM.some(act => act.includes(cleanMaj) || cleanMaj.includes(act));
-    });
+    const reportedList = reportedMajor.split(",").map(m => m.trim()).filter(m => m !== "");
+    const hasUndeclared = reportedList.some(m => /undeclared/i.test(m));
+    const hasMultipleMajors = reportedList.length > 1;
+    // can every reported major be verified? (except undeclared,major)
+    let majorIsVerified;
+    if (hasUndeclared && hasMultipleMajors) { 
+      majorIsVerified = true;
+    } else { 
+      majorIsVerified = reportedList.every(rep => {
+        const cleanMaj = normalize(rep);
+        return actualCleanedM.some(act => act.includes(cleanMaj) || cleanMaj.includes(act));
+      });
+    }
 
-    // add termsInAttendance to identifying info
-    dataMap[sid].identifying_info['Terms in attendance'] = studentTruth.termsInAttendance;
+    if (!majorIsVerified) dataMap[sid].unable_to_verify.push("Current Major");
+
 
     // VERIFY COURSE INFO
     Object.keys(courseInfo).forEach(colName => {
