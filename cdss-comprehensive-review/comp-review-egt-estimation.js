@@ -115,10 +115,23 @@ function writeToSheet(dataMap, sheetName) {
   sids.forEach(sid => {
     const student = dataMap[sid];
     Object.keys(student.identifying_info).forEach(k => headerSet.add(k));
-    Object.keys(student.course_info).forEach(k => headerSet.add(k));
+    // add course info while excluding any column containing "units"
+    Object.keys(student.course_info).forEach(k => {
+      if (!k.toLowerCase().includes("units")) {
+        headerSet.add(k);
+      }
+    });
     // Add specific calculated flags
     if (student.major_flags) {
-      Object.keys(student.major_flags).forEach(k => headerSet.add("Flag: " + k));
+      Object.keys(student.major_flags).forEach(k => {
+        // If it's a problem_grades key, split it into two specific columns
+        if (k.startsWith("problem_grades_")) {
+          headerSet.add(`Flag: ${k} PNP`);
+          headerSet.add(`Flag: ${k} Below C-`);
+        } else {
+          headerSet.add("Flag: " + k);
+        }
+      });
     }
   });
 
@@ -273,7 +286,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
         if (!coursesMap[courseName]) coursesMap[courseName] = [];
         coursesMap[courseName].push({
           termId: parseInt(termId || 0),
-          grade: grade || "N/A",
+          grade: grade || "No Grade on SIS",
           units:  units || 0 
         });
       });
@@ -473,7 +486,7 @@ function verifyInfo(dataMap, verbose = false) {
         // sem is "Test Score"
         // grade is "PL"
         const isTransfer = /transfer/i.test(courseName) || /transfer/i.test(semVal);
-        if (gradeVal === "PL" || semVal === "Test Score" || isTransfer || !courseName) return;
+        if (gradeVal === "PL" || semVal === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
 
         // try to find a grade match across attempts 1, 2, and 3
         let foundMatch = false;
@@ -631,6 +644,9 @@ function meetsDSRequirements(idInfo, courseInfo, currSem) {
 }
 
 // calculate GPA for courses in requirements
+// (DONE) if grade is not verified and SIS grade exists, use SIS grade
+// (DONE, I think) if grade is not verified and no SIS grade, exclude requirement
+// (TODO) if transfer, exclude from major GPA calculation)
 function calculateMajorGPA(courseInfo, requirements) {
   const pointVals = {"A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-":0.7, "F": 0};
 
@@ -687,7 +703,7 @@ function identifyProblemGrades(courseInfo, requirements) {
 // check if any courses for major receieved grade below C-
 // check if meets DS requirements if DS
 function majorFlags(idInfo, courseInfo, currSem) {
-  majorFlags = {};
+  const flags = {};
   // determine which majors the student is applying to
   const majors = [idInfo['First Choice Major'], idInfo['Second Choice Major'], idInfo['Third Choice Major']];
   // helper to check if any of the three major slots contain the target major
@@ -695,21 +711,21 @@ function majorFlags(idInfo, courseInfo, currSem) {
   let requirements;
   if (hasMajor("Data Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10", "DS Upper Division"];
-    majorFlags.major_gpa_ds = calculateMajorGPA(courseInfo, requirements);
-    majorFlags.meets_ds_requirements = meetsDSRequirements(idInfo, courseInfo);
-    majorFlags.problem_grades_ds = identifyProblemGrades(courseInfo, requirements);
+    flags.major_gpa_ds = calculateMajorGPA(courseInfo, requirements);
+    flags.meets_ds_requirements = meetsDSRequirements(idInfo, courseInfo);
+    flags.problem_grades_ds = identifyProblemGrades(courseInfo, requirements);
   }
   if (hasMajor("Computer Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #6", "LD #7", "LD #8", "LD #9", "CS Upper Division"];
-    majorFlags.major_gpa_cs = calculateMajorGPA(courseInfo, requirements);
-    majorFlags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
+    flags.major_gpa_cs = calculateMajorGPA(courseInfo, requirements);
+    flags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
   } 
   if (hasMajor("Statistics")) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
-    majorFlags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
-    majorFlags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
+    flags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
+    flags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
   }
-  return majorFlags;
+  return flags;
 }
 
 
@@ -723,7 +739,6 @@ function studentPlanFlags(dataMap, currSem) {
     dataMap[sid].predicted_egt_flags = [];
     const idInfo = dataMap[sid].identifying_info;
     const courseInfo = dataMap[sid].course_info;
-    const unverifiedInfo = dataMap[sid].unable_to_verify;
 
     dataMap[sid].predicted_egt_flags = predictedEgtFlags(idInfo, courseInfo);
     dataMap[sid].major_flags = majorFlags(idInfo, courseInfo, currSem);
