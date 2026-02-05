@@ -644,9 +644,9 @@ function meetsDSRequirements(idInfo, courseInfo, currSem) {
 }
 
 // calculate GPA for courses in requirements
-// (DONE) if grade is not verified and SIS grade exists, use SIS grade
-// (DONE, I think) if grade is not verified and no SIS grade, exclude requirement
-// (TODO) if transfer, exclude from major GPA calculation)
+// if grade is not verified and SIS grade exists, use SIS grade
+// if grade is not verified and no SIS grade (gradeVal is NA), exclude requirement
+// if transfer, exclude from major GPA calculation
 function calculateMajorGPA(courseInfo, requirements) {
   const pointVals = {"A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-":0.7, "F": 0};
 
@@ -658,9 +658,13 @@ function calculateMajorGPA(courseInfo, requirements) {
       const gradeVal = courseInfo[colName];
       const baseReqName = colName.replace(" grade", "");
       const unitsVal = courseInfo[baseReqName + " units"];
-      // end this iteration of forEach if no letter grade or units
+      const semVal = courseInfo[baseReqName + " sem"];
+      // end this iteration of forEach if no letter grade 
       if (pointVals[gradeVal] === undefined) return; 
+      // no units
       if (isNaN(unitsVal) || unitsVal === 0) return;
+      // transfer course or test score
+      if (!/^\d+$/.test(semVal)) return;
 
       totalGradePoints += unitsVal;
       earnedGradePoints += unitsVal * pointVals[gradeVal];
