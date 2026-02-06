@@ -203,7 +203,7 @@ function cleanCourses(dataMap) {
   });
 }
 
-// helper function to get course names that will hopefully match with API
+// helper function to get course names that will (mostly) match with API
 function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
@@ -334,7 +334,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
 }
 
 // helper function: get gpa and egt to verify
-// also get termsInAttendance
+// + keep track of termsInAttendance
 function fetchStudentData(studentId, verbose = false) {
   if (!studentId) {
     Logger.log("You appear to have passed in an empty SID (student API). Further investigation may be needed.")
@@ -422,7 +422,8 @@ function semToId(sem) {
   return id;
 }
 
-// Helper to compare grades (A > B > C etc.)
+// helper to compare grades (A > B > C etc.)
+// assumes letter grades are greater than PNP
 function getHighestGrade(gradeList) {
   const points = { "A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-": 0.7, "F": 0, "W": -1, "NP": -1, "I": -1, "P": -1};
   return gradeList.reduce((best, current) => {
@@ -430,79 +431,88 @@ function getHighestGrade(gradeList) {
   }, gradeList[0]);
 }
 
+// helper to verify admit term, egt, gpa, current college, current major
+// + keep track of terms in attendance and SIS EGT 
 function verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verbose) {
   const idInfo = dataMap[sid].identifying_info;
   // ADMIT TERM
   const firstSemId = semToId(idInfo["1st Sem"]);
-    dataMap[sid].identifying_info["1st Sem ID"] = firstSemId;
-    if (firstSemId != enrollmentTruth["Admit Term"]) {
-      verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which translates to ${firstSemId} and doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
-      dataMap[sid].unable_to_verify.push("1st Sem");
-    }
-    // EGT
-    if (semToId(idInfo["EGT"]) != studentTruth.egt) {
-      verbose && Logger.log(`${sid} stated egt: ${idInfo["EGT"]} which translates to ${semToId(idInfo["EGT"])} and doesn't match SIS ${studentTruth.egt}`);
-      dataMap[sid].unable_to_verify.push("EGT");
-    }
-    // GPA, allow for minor rounding differences
-    const reportedGPA = parseFloat(idInfo["CGPA"]);
-    const actualGPA = parseFloat(studentTruth.gpa);
-    if (isNaN(reportedGPA) || Math.abs(reportedGPA - actualGPA) > 0.05) {
-      verbose && Logger.log(`${sid} stated GPA ${reportedGPA} SIS states ${actualGPA}`)
-      dataMap[sid].unable_to_verify.push("CGPA");
-    }
+  dataMap[sid].identifying_info["1st Sem ID"] = firstSemId;
+  // if a student has a summer admit term, push them to the following fall
+  const rawAdmitTerm = enrollmentTruth["Admit Term"];
+  const adjustedAdmitTerm = String(rawAdmitTerm).endsWith("5") 
+    ? Number(rawAdmitTerm) + 3 
+    : Number(rawAdmitTerm);
+  if (firstSemId != adjustedAdmitTerm) {
+    verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which translates to ${firstSemId} and doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
+    dataMap[sid].unable_to_verify.push("1st Sem");
+  }
+  // EGT
+  if (semToId(idInfo["EGT"]) != studentTruth.egt) {
+    verbose && Logger.log(`${sid} stated egt: ${idInfo["EGT"]} which translates to ${semToId(idInfo["EGT"])} and doesn't match SIS ${studentTruth.egt}`);
+    dataMap[sid].unable_to_verify.push("EGT");
+  }
+  // GPA, allow for minor rounding differences
+  const reportedGPA = parseFloat(idInfo["CGPA"]);
+  const actualGPA = parseFloat(studentTruth.gpa);
+  if (isNaN(reportedGPA) || Math.abs(reportedGPA - actualGPA) > 0.05) {
+    verbose && Logger.log(`${sid} stated GPA ${reportedGPA} SIS states ${actualGPA}`)
+    dataMap[sid].unable_to_verify.push("CGPA");
+  }
 
-    // helper: normalize strings for fuzzy matching
-    const normalize = (str) => {
-      if (!str) return "";
-      return str
-        .toString()
-        .toLowerCase()
-        .replace("clg", "college")
-        .replace("&", "and")
-        .replace(/[^a-z0-9]/g, "");
-    }; 
-    // COLLEGE VERIFICATION
-    const reportedColleges = idInfo["Current College"] || ""; 
-    const actualColleges = studentTruth.colleges || []; 
-    const actualCleanedC = actualColleges.map(normalize);
+  // helper: normalize strings for fuzzy matching
+  const normalize = (str) => {
+    if (!str) return "";
+    return str
+      .toString()
+      .toLowerCase()
+      .replace("clg", "college")
+      .replace("&", "and")
+      .replace(/[^a-z0-9]/g, "");
+  }; 
+  // COLLEGE VERIFICATION
+  const reportedColleges = idInfo["Current College"] || ""; 
+  const actualColleges = studentTruth.colleges || []; 
+  const actualCleanedC = actualColleges.map(normalize);
 
-    // can every reported college be verified?
-    const collegeIsVerified = reportedColleges.split(",").every(rep => {
-      const cleanRep = normalize(rep);
-      return actualCleanedC.some(act => act.includes(cleanRep) || cleanRep.includes(act));
+  // can every reported college be verified?
+  const collegeIsVerified = reportedColleges.split(",").every(rep => {
+    const cleanRep = normalize(rep);
+    return actualCleanedC.some(act => act.includes(cleanRep) || cleanRep.includes(act));
+  });
+  if (!collegeIsVerified) {
+    verbose && Logger.log(`Student reported ${reportedColleges}, but SIS sees ${actualColleges} for current college`)
+    dataMap[sid].unable_to_verify.push("Current College");
+  }
+  // MAJOR VERIFICATION
+  const reportedMajor = idInfo["Current Major"] || "";
+  const actualMajor = studentTruth.majors || [];
+  const actualCleanedM = actualMajor.map(normalize);
+
+  const reportedList = reportedMajor.split(",").map(m => m.trim()).filter(m => m !== "");
+  const hasUndeclared = reportedList.some(m => /undeclared/i.test(m));
+  const hasMultipleMajors = reportedList.length > 1;
+  // can every reported major be verified? (except "Undeclared,Major")
+  let majorIsVerified;
+  if (hasUndeclared && hasMultipleMajors) { 
+    majorIsVerified = true;
+  } else { 
+    majorIsVerified = reportedList.every(rep => {
+      const cleanMaj = normalize(rep);
+      return actualCleanedM.some(act => act.includes(cleanMaj) || cleanMaj.includes(act));
     });
-    if (!collegeIsVerified) {
-      verbose && Logger.log(`Student reported ${reportedColleges}, but SIS sees ${actualColleges} for current college`)
-      dataMap[sid].unable_to_verify.push("Current College");
-    }
-    // MAJOR VERIFICATION
-    const reportedMajor = idInfo["Current Major"] || "";
-    const actualMajor = studentTruth.majors || [];
-    const actualCleanedM = actualMajor.map(normalize);
-
-    const reportedList = reportedMajor.split(",").map(m => m.trim()).filter(m => m !== "");
-    const hasUndeclared = reportedList.some(m => /undeclared/i.test(m));
-    const hasMultipleMajors = reportedList.length > 1;
-    // can every reported major be verified? (except "Undeclared,Major")
-    let majorIsVerified;
-    if (hasUndeclared && hasMultipleMajors) { 
-      majorIsVerified = true;
-    } else { 
-      majorIsVerified = reportedList.every(rep => {
-        const cleanMaj = normalize(rep);
-        return actualCleanedM.some(act => act.includes(cleanMaj) || cleanMaj.includes(act));
-      });
-    }
-    if (!majorIsVerified) {
-      verbose && Logger.log(`Student reported ${reportedMajor}, but SIS sees ${actualMajor} for current Major`)
-      dataMap[sid].unable_to_verify.push("Current Major");
-    }
-    // add for later (internal calculation) use
-    dataMap[sid].identifying_info['Terms in attendance'] = studentTruth.termsInAttendance;
-    dataMap[sid].identifying_info['SIS EGT'] = studentTruth.egt;
+  }
+  if (!majorIsVerified) {
+    verbose && Logger.log(`Student reported ${reportedMajor}, but SIS sees ${actualMajor} for current Major`)
+    dataMap[sid].unable_to_verify.push("Current Major");
+  }
+  // add for later (internal calculation) use
+  dataMap[sid].identifying_info['Terms in attendance'] = studentTruth.termsInAttendance;
+  dataMap[sid].identifying_info['SIS EGT'] = studentTruth.egt;
 }
 
+// helper to verify course grade and semester information
+// TODO update semester if it doesn't match application
 function verifyCourseInfo(sid, dataMap, enrollmentTruth, verbose) {
   const courseInfo = dataMap[sid].course_info;
   Object.keys(courseInfo).forEach(colName => {
@@ -631,7 +641,7 @@ function egtFlags(idInfo, courseInfo) {
 
 // checks for passing letter grades (or test scores) in
 // LD 5 + (LD 1 | LD 2 | LD 6)
-function meetsDSRequirementsBasic(courseInfo) {
+function meetsDSAdmitReqBasic(courseInfo) {
   gradesNotAccepted = ["P", "NP", "PL", "D+", "D-", "D", "F", "NA"]
   if (gradesNotAccepted.includes(courseInfo["LD #5 DSc8/St20 grade"]) ) {
     return false;
@@ -650,6 +660,8 @@ function meetsDSRequirementsBasic(courseInfo) {
   }
 }
 
+// return the number of completed for a letter grade and
+// in progress courses that count towards the DS lower div req
 function countReqDS(courseInfo, currSem) {
   const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
   const notLetterGrade = ["PL", "P", "NP", "NA"];
@@ -669,8 +681,9 @@ function countReqDS(courseInfo, currSem) {
   return total;
 }
 
-function meetsDSRequirements(idInfo, courseInfo, currSem) {
-  if (!meetsDSRequirementsBasic(courseInfo)) return false;
+// according to https://cdss.berkeley.edu/dsus/academics/declaring-major
+function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
+  if (!meetsDSAdmitReqBasic(courseInfo)) return false;
 
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   const termsInAttendance = idInfo["Terms in attendance"];
@@ -704,6 +717,14 @@ function meetsDSRequirements(idInfo, courseInfo, currSem) {
     }
   }
   return false;
+}
+
+// TODO
+// https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=0#gid=0
+function meetsCSAdmitReq(idInfo, courseInfo) {
+  // no transfers are eligible for comprehensive review
+  const isTransfer = idInfo["FY vs TR"] === "Transfer";
+  if (isTransfer) return false;
 }
 
 // calculate GPA for courses in requirements
@@ -768,7 +789,7 @@ function identifyProblemGrades(courseInfo, requirements) {
 // return major GPA (SIS data)
 // check if any courses for major were taken P/NP
 // check if any courses for major receieved grade below C-
-// check if meets DS requirements if DS
+// check if meets admit requirements
 function majorFlags(idInfo, courseInfo, currSem) {
   const flags = {};
   // determine which majors the student is applying to
@@ -779,13 +800,14 @@ function majorFlags(idInfo, courseInfo, currSem) {
   if (hasMajor("Data Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10", "DS Upper Division"];
     flags.major_gpa_ds = calculateMajorGPA(courseInfo, requirements);
-    flags.meets_ds_requirements = meetsDSRequirements(idInfo, courseInfo, currSem);
     flags.problem_grades_ds = identifyProblemGrades(courseInfo, requirements);
+    flags.meets_ds_admit_requirements = meetsDSAdmitReq(idInfo, courseInfo, currSem);
   }
   if (hasMajor("Computer Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #6", "LD #7", "LD #8", "LD #9", "CS Upper Division"];
     flags.major_gpa_cs = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
+    // flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo);
   } 
   if (hasMajor("Statistics")) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
