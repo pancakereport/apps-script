@@ -443,7 +443,7 @@ function verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verb
   const adjustedAdmitTerm = String(rawAdmitTerm).endsWith("5") 
     ? Number(rawAdmitTerm) + 3 
     : Number(rawAdmitTerm);
-  if (firstSemId != adjustedAdmitTerm) {
+  if (firstSemId != rawAdmitTerm && firstSemId != adjustedAdmitTerm) {
     verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which translates to ${firstSemId} and doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
     dataMap[sid].unable_to_verify.push("1st Sem");
   }
@@ -633,7 +633,7 @@ function egtFlags(idInfo, courseInfo) {
   if (!isNaN(appEGT) && terms.some(t => t.sem > appEGT)) {
     retval.push("Terms planned after application EGT");
   }
-  if (!isNan(sisEGT) && terms.some(t => t.sem > sisEGT)) {
+  if (!isNaN(sisEGT) && terms.some(t => t.sem > sisEGT)) {
     retval.push("Terms planned after EGT from SIS");
   }
   return retval;
@@ -721,10 +721,21 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
 
 // TODO
 // https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=0#gid=0
-function meetsCSAdmitReq(idInfo, courseInfo) {
+function meetsCSAdmitReq(idInfo, courseInfo, cs_gpa) {
   // no transfers are eligible for comprehensive review
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   if (isTransfer) return false;
+
+  gradesNotAccepted = ["P", "NP", "PL", "D+", "D-", "D", "F", "NA"]
+  // LD 1, LD 2 completed
+  if (gradesNotAccepted.includes(courseInfo["LD #1 Calc 1 grade"]) || gradesNotAccepted.includes(courseInfo["LD #2 Calc 2 grade"])) {
+    return false;
+  }
+  // LD 4 enrolled. if physics 89 must have physics declared? 
+  // LD 6, LD 7, LD 9 must have 1 completed, 2 enrolled
+
+  // majorGPA must be >= 3.0
+
 }
 
 // calculate GPA for courses in requirements
@@ -805,9 +816,10 @@ function majorFlags(idInfo, courseInfo, currSem) {
   }
   if (hasMajor("Computer Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #6", "LD #7", "LD #8", "LD #9", "CS Upper Division"];
-    flags.major_gpa_cs = calculateMajorGPA(courseInfo, requirements);
+    const cs_gpa = calculateMajorGPA(courseInfo, requirements);
+    flags.major_gpa_cs = cs_gpa;
     flags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
-    // flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo);
+    // flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo, cs_gpa);
   } 
   if (hasMajor("Statistics")) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
