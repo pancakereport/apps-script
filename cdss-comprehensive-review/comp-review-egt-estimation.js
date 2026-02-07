@@ -661,9 +661,9 @@ function meetsDSAdmitReqBasic(courseInfo) {
 }
 
 // return the number of completed for a letter grade and
-// in progress courses that count towards the DS lower div req
-function countReqDS(courseInfo, currSem) {
-  const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
+// in progress courses that count towards lower_div
+function countReq(courseInfo, lower_div, currSem) {
+  // const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
   const notLetterGrade = ["PL", "P", "NP", "NA"];
   let total = 0;
 
@@ -687,7 +687,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
 
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   const termsInAttendance = idInfo["Terms in attendance"];
-  const numCompleted = countReqDS(courseInfo, currSem);
+  const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
+  const numCompleted = countReq(courseInfo, lower_div, currSem);
   if (!isTransfer) { // first year admit
     if (termsInAttendance < 3) { // first year
       // basic + one additional course completed = 3 reqs
@@ -719,23 +720,48 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
   return false;
 }
 
-// TODO
 // https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=0#gid=0
-function meetsCSAdmitReq(idInfo, courseInfo, cs_gpa) {
+function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   // no transfers are eligible for comprehensive review
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   if (isTransfer) return false;
 
-  gradesNotAccepted = ["P", "NP", "PL", "D+", "D-", "D", "F", "NA"]
+  const gradesNotAcceptedCompleted = ["P", "NP", "PL", "D+", "D-", "D", "F", "NA"];
+  const gradesNotAcceptedInProgress = ["P", "NP", "D+", "D-", "D", "F", "NA"]
   // LD 1, LD 2 completed
-  if (gradesNotAccepted.includes(courseInfo["LD #1 Calc 1 grade"]) || gradesNotAccepted.includes(courseInfo["LD #2 Calc 2 grade"])) {
+  if (gradesNotAcceptedCompleted.includes(courseInfo["LD #1 Calc 1 grade"]) || gradesNotAcceptedCompleted.includes(courseInfo["LD #2 Calc 2 grade"])) {
     return false;
   }
-  // LD 4 enrolled. if physics 89 must have physics declared? 
+  // LD 4 passing grade or enrolled currSem
+  // if physics 89 must have physics listed as major
+  const ld4sem = courseInfo["LD #4 LinAlg sem"];
+  const ld4isFuture = ld4sem !== "Transfer" && parseInt(ld4sem) > currSem;
+  if (ld4sem === "Other") {
+    return "More investigation needed, see LD4";
+  }
+  if (courseInfo["LD #4 LinAlg course"] === "PHYSICS 89" && !idInfo["Current Major"].includes("Physics")) {
+    return false;
+  }
+  if (gradesNotAcceptedInProgress.includes(courseInfo["LD #4 LinAlg grade"]) || ld4isFuture) {
+    return false;
+  } 
   // LD 6, LD 7, LD 9 must have 1 completed, 2 enrolled
-
+  const lower_div = ["LD #6", "LD #7", "LD #9"];
+  if (countReq(courseInfo, lower_div, currSem) != 3) {
+    return false;
+  } // 
+   if (courseInfo["LD #6 CS 61A grade"] === "PL" && courseInfo["LD #7 CS 61B grade"] === "PL" && courseInfo["LD #9 CS70 grade"] === "PL") {
+    return false;
+  }
   // majorGPA must be >= 3.0
-
+  if (cs_gpa >= 3.0) {
+    return true;
+  } else if (courseInfo["LD #4 LinAlg grade"] === "PL" || courseInfo["LD #6 CS 61A grade"] === "PL" || 
+  courseInfo["LD #7 CS 61B grade"] === "PL" || courseInfo["LD #9 CS70 grade"] === "PL") {
+    return "GPA below 3.0 with courses in progress";
+  } else {
+    return false;
+  }
 }
 
 // calculate GPA for courses in requirements
@@ -819,7 +845,7 @@ function majorFlags(idInfo, courseInfo, currSem) {
     const cs_gpa = calculateMajorGPA(courseInfo, requirements);
     flags.major_gpa_cs = cs_gpa;
     flags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
-    // flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo, cs_gpa);
+    flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo, cs_gpa);
   } 
   if (hasMajor("Statistics")) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
