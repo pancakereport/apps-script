@@ -660,6 +660,11 @@ function meetsDSAdmitReqBasic(courseInfo) {
   }
 }
 
+// TODO
+// update into two functions. count num completed (letter grade)
+// and count enrolled (currSem)
+
+
 // return the number of completed for a letter grade and
 // in progress courses that count towards lower_div
 function countReq(courseInfo, lower_div, currSem) {
@@ -702,7 +707,7 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
     } else if (termsInAttendance > 6) { // fourth year, beyond
       return `Too many terms in attendance (${termsInAttendance} terms)`;
     }
-  } else { // transfer
+  } else { // transfer admit
     if (termsInAttendance == 6) { // new transfer
       if (numCompleted == 7) {
         return true;
@@ -762,6 +767,30 @@ function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   } else {
     return false;
   }
+}
+
+// https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=1222050180#gid=1222050180
+function meetsStAdmitReq(idInfo, courseInfo, currSem) {
+  const isTransfer = idInfo["FY vs TR"] === "Transfer";
+  const termsInAttendance = idInfo["Terms in attendance"];
+  if (!isTransfer) { // first year admit
+    if (termsInAttendance < 3) { // first year
+      // completed LD 1; LD 2, LD 5 enrolled
+    } else if (termsInAttendance < 5) { // second year
+      // completed LD 1, LD 2, LD 5; LD 3 or LD 4 enrolled
+    } else if (termsInAttendance < 7) { // third year
+      // completed LD 1, LD 2, LD 5
+      // LD 3/LD 4 one completed, one enrolled
+      // ST Upper Division#2 enrolled 
+    } else if (termsInAttendance > 7) { // applying with 4+ semesters at UC Berkeley
+      return  `Too many terms in attendance (${termsInAttendance} terms)`;
+    }
+  } else { // transfer admit
+      // LD 5 enrolled
+      // LD 1, LD 2 completed
+      // LD 3/LD 4 one completed, one enrolled
+  }
+
 }
 
 // calculate GPA for courses in requirements
@@ -851,14 +880,13 @@ function majorFlags(idInfo, courseInfo, currSem) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
     flags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
+    // flag.meets_st_admit_requirements = meetsStAdmitReq(idInfo, courseInfo, currSem);
   }
   return flags;
 }
 
-
-// what about units (too many, too few?) -> laura thinks not too big of a deal 
-// anything about gen ed?
-// flag for student plan doesn't meet major requirements, listed courses don't work
+// flag for student plan doesn't meet major requirements, 
+// TODO verify if listed courses work (upper div)
 function studentPlanFlags(dataMap, currSem) {
   const sids = Object.keys(dataMap);
 
