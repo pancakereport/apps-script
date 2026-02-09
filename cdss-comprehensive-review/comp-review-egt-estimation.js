@@ -512,8 +512,7 @@ function verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verb
 }
 
 // helper to verify course grade and semester information
-// TODO update semester if it doesn't match application
-function verifyCourseInfo(sid, dataMap, enrollmentTruth, verbose) {
+function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
   const courseInfo = dataMap[sid].course_info;
   Object.keys(courseInfo).forEach(colName => {
     if (colName.includes("grade")) {
@@ -525,7 +524,7 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, verbose) {
 
       // SKIP for transfers, test scores, or placeholders
       const isTransfer = /transfer/i.test(courseName) || /transfer/i.test(semVal);
-      if (gradeVal === "PL" || semVal === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
+      if (semVal === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
 
       // try to find a grade match across attempts 1, 2, and 3
       let foundMatch = false;
@@ -534,19 +533,39 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, verbose) {
       for (let attempt = 1; attempt <= 3; attempt++) {
         // check standard name and fall program for freshman
         const variants = [
-          { grade: `${courseName} | ${attempt} | 2 Grade`, units: `${courseName} | ${attempt} | 3 Units` },
-          { grade: `X${courseName} | ${attempt} | 2 Grade`, units: `X${courseName} | ${attempt} | 3 Units` }
+          {grade: `${courseName} | ${attempt} | 2 Grade`, 
+            units: `${courseName} | ${attempt} | 3 Units`,
+            termId:  `${courseName} | ${attempt} | 4 Semester`},
+          {grade: `X${courseName} | ${attempt} | 2 Grade`, 
+            units: `X${courseName} | ${attempt} | 3 Units`,
+            termId:  `X${courseName} | ${attempt} | 4 Semester`}
         ];
 
         for (const variant of variants) {
+          const apiSem = enrollmentTruth[variant.termId];
           const apiGrade = enrollmentTruth[variant.grade];
+
+          if (semVal == currSem) {
+            // We only care about the API record if it's also for the current semester
+            if (apiSem == currSem) {
+              foundMatch = true;
+              break; 
+            } else {
+              // record found for this course, but it's NOT for currSem; let the loop 
+              // continue to see if another 'attempt' matches the currSem.
+              continue; 
+            }
+          }
           if (apiGrade !== undefined && apiGrade !== null) {
             const formattedApiGrade = apiGrade.toString().toUpperCase();
             possibleGradesFound.push(formattedApiGrade);
-            unitsFound = enrollmentTruth[variant.units] || 0;
             
             if (formattedApiGrade === gradeVal) {
+              unitsFound = enrollmentTruth[variant.units] || 0;
               foundMatch = true;
+              if (semVal != apiSem) {
+                dataMap[sid].course_info[baseReqName + " sem"] = apiSem;
+              }
               break; // inner loop (variants)
             }
           }
@@ -559,18 +578,23 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, verbose) {
 
       // update dataMap based on findings
       if (!foundMatch) {
+        dataMap[sid].unable_to_verify.push(baseReqName);
         if (verbose) {
-          Logger.log(`${sid}: API doesn't have record of ${courseName} for requirement ${baseReqName} with grade ${gradeVal}. 
+          if (gradeVal === "PL") {
+            Logger.log(`${sid}: API doesn't have a current enrollment record of ${courseName} for requirement ${baseReqName}`);
+          } else {
+            Logger.log(`${sid}: API doesn't have record of ${courseName} for requirement ${baseReqName} with grade ${gradeVal}. 
             SIS saw: ${possibleGradesFound.join(', ') || 'Nothing'}`);
+          }
         }
-        // course not found in SIS
-        if (possibleGradesFound.length === 0) {
+
+        if (semVal === currSem) {
+          dataMap[sid].course_info[baseReqName + " sem"] = `No API enrollment found for ${currSem}`
+        } else if (possibleGradesFound.length === 0) {
           dataMap[sid].course_info[colName] = "NA";
-        // course found in SIS but grade didn't match student report
         } else {
           dataMap[sid].course_info[colName] = getHighestGrade(possibleGradesFound);
         }
-        dataMap[sid].unable_to_verify.push(baseReqName);
       }
     }
   });
