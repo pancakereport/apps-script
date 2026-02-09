@@ -10,7 +10,7 @@ function fullFunction() {
   const currSem = 2262;
   const dataMap = getInput(false);
   cleanCourses(dataMap);
-  verifyInfo(dataMap, true); // verbose is true right now
+  verifyInfo(dataMap, currSem, true); // verbose is true right now
   studentPlanFlags(dataMap, currSem);
   writeToSheet(dataMap, "Intermediate Processed Data");
 }
@@ -425,7 +425,7 @@ function semToId(sem) {
 // helper to compare grades (A > B > C etc.)
 // assumes letter grades are greater than PNP
 function getHighestGrade(gradeList) {
-  const points = { "A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-": 0.7, "F": 0, "W": -1, "NP": -1, "I": -1, "P": -1};
+  const points = { "A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "D-": 0.7, "F": 0, "W": -1, "NP": -1, "I": -1, "P": -1, "ENROLLED BUT NO GRADE": -1};
   return gradeList.reduce((best, current) => {
     return (points[current] || 0) > (points[best] || 0) ? current : best;
   }, gradeList[0]);
@@ -615,7 +615,7 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
  *         course_info: {col: val, ...},
  *         unable_to_verify: [col1, col2, ...]}}
  */ 
-function verifyInfo(dataMap, verbose = false) {
+function verifyInfo(dataMap, currSem, verbose = false) {
   const sids = Object.keys(dataMap);
   
   sids.forEach(sid => {
@@ -629,7 +629,7 @@ function verifyInfo(dataMap, verbose = false) {
     }
 
     verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verbose);
-    verifyCourseInfo(sid, dataMap, enrollmentTruth, verbose);
+    verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose);
   });
   return dataMap;
 }
@@ -663,6 +663,42 @@ function egtFlags(idInfo, courseInfo) {
   return retval;
 }
 
+// count num completed (letter grade) for reqs
+function countReqCompleted(courseInfo, reqs) {
+  const notLetterGrade = ["PL", "P", "NP", "NA", "ENROLLED BUT NO GRADE", "I"];
+  let total = 0;
+
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
+      const baseReqName = colName.replace(" course", "");
+      const gradeVal = courseInfo[baseReqName + " grade"];
+      
+      if (!notLetterGrade.includes(gradeVal)) {
+        total += 1
+      }
+    }
+  });
+  return total;
+}
+
+// count num enrolled of courses in reqs
+function countReqEnrolled(courseInfo, reqs, currSem) {
+  let total = 0;
+
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
+      const baseReqName = colName.replace(" course", "");
+      const gradeVal = courseInfo[baseReqName + " grade"];
+      const semVal = courseInfo[baseReqName + " sem"];
+      
+      if (semVal == currSem) {
+        total += 1
+      }
+    }
+  });
+  return total;
+}
+
 // checks for passing letter grades (or test scores) in
 // LD 5 + (LD 1 | LD 2 | LD 6)
 function meetsDSAdmitReqBasic(courseInfo) {
@@ -684,32 +720,6 @@ function meetsDSAdmitReqBasic(courseInfo) {
   }
 }
 
-// TODO
-// update into two functions. count num completed (letter grade)
-// and count enrolled (currSem)
-
-
-// return the number of completed for a letter grade and
-// in progress courses that count towards lower_div
-function countReq(courseInfo, lower_div, currSem) {
-  // const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
-  const notLetterGrade = ["PL", "P", "NP", "NA"];
-  let total = 0;
-
-  Object.keys(courseInfo).forEach(colName => {
-    if (colName.includes("course") && lower_div.some(req => colName.startsWith(req))) {
-      const baseReqName = colName.replace(" course", "");
-      const gradeVal = courseInfo[baseReqName + " grade"];
-      const semVal = courseInfo[baseReqName + " sem"];
-      
-      if (semVal == currSem || !notLetterGrade.includes(gradeVal)) {
-        total += 1
-      }
-    }
-  });
-  return total;
-}
-
 // according to https://cdss.berkeley.edu/dsus/academics/declaring-major
 function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
   if (!meetsDSAdmitReqBasic(courseInfo)) return false;
@@ -717,26 +727,29 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   const termsInAttendance = idInfo["Terms in attendance"];
   const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
-  const numCompleted = countReq(courseInfo, lower_div, currSem);
+  const numCompleted = countReqCompleted(courseInfo, lower_div);
+  const numEnrolled = countReqEnrolled(courseInfo, lower_div, currSem);
   if (!isTransfer) { // first year admit
     if (termsInAttendance < 3) { // first year
-      // basic + one additional course completed = 3 reqs
-      return numCompleted >= 3;
+      // basic + one additional course = 3 reqs
+      return numCompleted + numEnrolled >= 3 ;
     } else if (termsInAttendance < 5) { // second year
       // basic + three additional courses = 5 reqs
-      return numCompleted >= 5;
+      return numCompleted + numEnrolled >= 5;
     } else if (termsInAttendance < 7) { // third year
       // all reqs completed or in progress = 7 reqs
-      return numCompleted == 7;
+      return numCompleted + numEnrolled == 7;
     } else if (termsInAttendance > 6) { // fourth year, beyond
       return `Too many terms in attendance (${termsInAttendance} terms)`;
     }
   } else { // transfer admit
-    if (termsInAttendance == 6) { // new transfer
-      if (numCompleted == 7) {
+    if (termsInAttendance === 6) { // new transfer
+      if (numCompleted === 7) {
         return true;
-      } else {
+      } else if (numCompleted === 6) {
         return "Summer Course Required to complete LD req";
+      } else {
+        return false;
       }
     } else if (termsInAttendance == 7) { // continuing transfer
       return numCompleted == 7;
@@ -750,6 +763,7 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
 }
 
 // https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=0#gid=0
+// TODO fix with new countReqCompleted and countReqEnrolled
 function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   // no transfers are eligible for comprehensive review
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
@@ -776,17 +790,15 @@ function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   } 
   // LD 6, LD 7, LD 9 must have 1 completed, 2 enrolled
   const lower_div = ["LD #6", "LD #7", "LD #9"];
-  if (countReq(courseInfo, lower_div, currSem) != 3) {
-    return false;
-  } // 
-   if (courseInfo["LD #6 CS 61A grade"] === "PL" && courseInfo["LD #7 CS 61B grade"] === "PL" && courseInfo["LD #9 CS70 grade"] === "PL") {
+  const numReqCompleted = countReqCompleted(courseInfo, lower_div);
+  const numReqEnrolled = countReqEnrolled(courseInfo, reqs, currSem);
+  if (numReqCompleted < 1 || numReqCompleted + numReqEnrolled != 3) {
     return false;
   }
   // majorGPA must be >= 3.0
   if (cs_gpa >= 3.0) {
     return true;
-  } else if (courseInfo["LD #4 LinAlg grade"] === "PL" || courseInfo["LD #6 CS 61A grade"] === "PL" || 
-  courseInfo["LD #7 CS 61B grade"] === "PL" || courseInfo["LD #9 CS70 grade"] === "PL") {
+  } else if (numReqEnrolled > 0 || courseInfo["LD #4 LinAlg grade"] === "PL") {
     return "GPA below 3.0 with courses in progress";
   } else {
     return false;
@@ -797,24 +809,71 @@ function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
 function meetsStAdmitReq(idInfo, courseInfo, currSem) {
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   const termsInAttendance = idInfo["Terms in attendance"];
+  const gradesNotAcceptedCompleted = ["P", "NP", "PL", "D+", "D-", "D", "F", "NA"];
   if (!isTransfer) { // first year admit
     if (termsInAttendance < 3) { // first year
       // completed LD 1; LD 2, LD 5 enrolled
+      if (gradesNotAcceptedCompleted.includes(courseInfo["LD #1 Calc 1 grade"])) {
+        return false
+      }
+      const lower_div = ["LD #2", "LD #5"];
+      const numReqCompleted = countReqCompleted(courseInfo, lower_div);
+      const numReqEnrolled = countReqEnrolled(courseInfo, reqs, currSem);
+
+      return numReqCompleted + numReqEnrolled === 2;
     } else if (termsInAttendance < 5) { // second year
       // completed LD 1, LD 2, LD 5; LD 3 or LD 4 enrolled
+      const lower_div = ["LD #1", "LD #2", "LD #5"];
+      const numReqCompleted = countReqCompleted(courseInfo, lower_div);
+      if (numReqCompleted != lower_div.length) {
+        return false;
+      } 
+      const lower_div2 = ["LD #3", "LD #4"];
+      const numReqCompleted2 = countReqCompleted(courseInfo, lower_div2);
+      const numReqEnrolled2 = countReqEnrolled(courseInfo, lower_div2, currSem);
+
+      return numReqCompleted2 + numReqEnrolled2 === lower_div2.length;
     } else if (termsInAttendance < 7) { // third year
       // completed LD 1, LD 2, LD 5
+      const lower_div = ["LD #1", "LD #2", "LD #5"];
+      const numReqCompleted = countReqCompleted(courseInfo, lower_div);
+      if (numReqCompleted != lower_div.length) {
+        return false;
+      } 
       // LD 3/LD 4 one completed, one enrolled
+      const lower_div2 = ["LD #3", "LD #4"];
+      const numReqCompleted2 = countReqCompleted(courseInfo, lower_div2);
+      const numReqEnrolled2 = countReqEnrolled(courseInfo, lower_div2, currSem);
+      if (numReqCompleted2 + numReqEnrolled2 !== lower_div2.length) {
+        return false;
+      }
       // ST Upper Division#2 enrolled 
+      if (courseInfo["ST Upper Division#2 grade"] == "PL" || !gradesNotAcceptedCompleted.includes(courseInfo["ST Upper Division#2 grade"])) {
+        return true;
+      } else {
+        return false;
+      }
     } else if (termsInAttendance > 7) { // applying with 4+ semesters at UC Berkeley
       return  `Too many terms in attendance (${termsInAttendance} terms)`;
     }
   } else { // transfer admit
-      // LD 5 enrolled
       // LD 1, LD 2 completed
+      const lower_div = ["LD #1", "LD #2"];
+      const numReqCompleted = countReqCompleted(courseInfo, lower_div);
+      if (numReqCompleted != lower_div.length) {
+        return false;
+      } 
+      // LD 5 enrolled
+      if (courseInfo["LD #5 DSc8/St20 grade"] !== "PL" || gradesNotAcceptedCompleted.includes(courseInfo["LD #5 DSc8/St20 grade"])) {
+        return false;
+      }
       // LD 3/LD 4 one completed, one enrolled
-  }
+      const lower_div2 = ["LD #3", "LD #4"];
+      const numReqCompleted2 = countReqCompleted(courseInfo, lower_div2);
+      const numReqEnrolled2 = countReqEnrolled(courseInfo, lower_div2, currSem);
 
+      return numReqCompleted2 + numReqEnrolled2 === lower_div2.length;
+  }
 }
 
 // calculate GPA for courses in requirements
