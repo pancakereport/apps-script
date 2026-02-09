@@ -295,7 +295,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
         if (!coursesMap[courseName]) coursesMap[courseName] = [];
         coursesMap[courseName].push({
           termId: parseInt(termId || 0),
-          grade: grade || "Enrolled but No Grade",
+          grade: grade || "ENROLLED BUT NO GRADE",
           units:  units || 0 
         });
       });
@@ -406,7 +406,7 @@ function semToId(sem) {
   // split to into semester and year 
   sem = sem.split(" ");
   const semester = sem[0];
-  const year = sem[1];
+  const year = String(sem[1]);
   const year_digits = year.split("")
 
   let semester_digit;
@@ -522,9 +522,9 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
       const semVal = courseInfo[baseReqName + " sem"];
       let unitsFound = 0;
 
-      // SKIP for transfers, test scores, or placeholders
+      // SKIP for transfers, test scores, future classes beyond currSem, and placeholders
       const isTransfer = /transfer/i.test(courseName) || /transfer/i.test(semVal);
-      if (semVal === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
+      if (semVal > currSem || semVal === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
 
       // try to find a grade match across attempts 1, 2, and 3
       let foundMatch = false;
@@ -751,8 +751,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       } else {
         return false;
       }
-    } else if (termsInAttendance == 7) { // continuing transfer
-      return numCompleted == 7;
+    } else if (termsInAttendance === 7) { // continuing transfer
+      return numCompleted === 7;
     } else if (termsInAttendance > 7) { // applying with 4+ semesters at UC Berkeley
       return  `Too many terms in attendance (${termsInAttendance} terms)`;
     } else { // this should never be reached, but just in case
@@ -763,7 +763,6 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
 }
 
 // https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=0#gid=0
-// TODO fix with new countReqCompleted and countReqEnrolled
 function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   // no transfers are eligible for comprehensive review
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
@@ -791,7 +790,7 @@ function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   // LD 6, LD 7, LD 9 must have 1 completed, 2 enrolled
   const lower_div = ["LD #6", "LD #7", "LD #9"];
   const numReqCompleted = countReqCompleted(courseInfo, lower_div);
-  const numReqEnrolled = countReqEnrolled(courseInfo, reqs, currSem);
+  const numReqEnrolled = countReqEnrolled(courseInfo, lower_div, currSem);
   if (numReqCompleted < 1 || numReqCompleted + numReqEnrolled != 3) {
     return false;
   }
@@ -818,7 +817,7 @@ function meetsStAdmitReq(idInfo, courseInfo, currSem) {
       }
       const lower_div = ["LD #2", "LD #5"];
       const numReqCompleted = countReqCompleted(courseInfo, lower_div);
-      const numReqEnrolled = countReqEnrolled(courseInfo, reqs, currSem);
+      const numReqEnrolled = countReqEnrolled(courseInfo, lower_div, currSem);
 
       return numReqCompleted + numReqEnrolled === 2;
     } else if (termsInAttendance < 5) { // second year
@@ -893,7 +892,7 @@ function calculateMajorGPA(courseInfo, requirements) {
       const unitsVal = courseInfo[baseReqName + " units"];
       const semVal = courseInfo[baseReqName + " sem"];
       // end this iteration of forEach if no letter grade 
-      if (pointVals[gradeVal] === undefined) return; 
+      if (!(gradeVal in pointVals)) return;
       // no units
       if (isNaN(unitsVal) || unitsVal === 0) return;
       // transfer course or test score
