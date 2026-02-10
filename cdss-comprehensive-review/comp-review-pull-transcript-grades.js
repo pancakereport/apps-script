@@ -108,7 +108,6 @@ function fetchEnrollmentData(studentId, verbose = false) {
       resultMapping["Admit Term"] = minTerm === Infinity ? "N/A" : minTerm;
 
       // For each course, sort by termId (descending) and take the top 3
-      // double check that termIds ARE ordered and that the largest numbers are the most recent
       Object.keys(coursesMap).forEach(courseName => {
         const sortedHistory = coursesMap[courseName].sort((a, b) => b.termId - a.termId);
 

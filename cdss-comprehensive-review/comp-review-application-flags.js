@@ -303,7 +303,6 @@ function fetchEnrollmentData(studentId, verbose = false) {
       resultMapping["Admit Term"] = minTerm === Infinity ? "N/A" : minTerm;
 
       // For each course, sort by termId (descending) and take the top 3
-      // double check that termIds ARE ordered and that the largest numbers are the most recent
       Object.keys(coursesMap).forEach(courseName => {
         const sortedHistory = coursesMap[courseName].sort((a, b) => b.termId - a.termId);
 
@@ -989,7 +988,7 @@ function majorFlags(idInfo, courseInfo, currSem) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
     flags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
-    flag.meets_st_admit_requirements = meetsStAdmitReq(idInfo, courseInfo, currSem);
+    flags.meets_st_admit_requirements = meetsStAdmitReq(idInfo, courseInfo, currSem);
   }
   return flags;
 }
