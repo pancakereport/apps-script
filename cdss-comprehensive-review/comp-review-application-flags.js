@@ -380,8 +380,7 @@ function fetchStudentData(studentId, verbose = false) {
             if (plan.academicPlan?.type?.code !== "MAJ") return;
             studentData.egt = plan.expectedGraduationTerm?.id || null;
             studentData.majors.push(plan.academicPlan?.plan?.formalDescription);
-            studentData.colleges.push(plan.academicProgram?.academicGroup?.formalDescription) // not the closest but maybe i can do some rounding
-
+            studentData.colleges.push(plan.academicProgram?.academicGroup?.formalDescription)
           });
         }
       } else {

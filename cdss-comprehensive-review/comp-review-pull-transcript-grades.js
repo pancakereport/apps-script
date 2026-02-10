@@ -80,7 +80,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
       const enrollments = json?.apiResponse?.response?.enrollmentsByStudent?.studentEnrollments;
       // Start high to find the minimum term
       let minTerm = Infinity; 
-      // Determine how many R&C courses a student has taken
+      // Imperfect check for if student completed a R&C course
       const resultMapping = {
         "Taken R&C": enrollments.filter(e => e?.classSection?.class?.course?.catalogNumber?.prefix === "R").length
       };
@@ -91,7 +91,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
         const grade = e?.grades?.[0]?.mark;
         const courseName = e?.classSection?.class?.course?.displayName;
 
-        // Update minTerm is grade exists
+        // Update minTerm if grade exists
         if (termId && grade && termId < minTerm) {
           minTerm = termId;
         }
@@ -101,7 +101,7 @@ function fetchEnrollmentData(studentId, verbose = false) {
         if (!coursesMap[courseName]) coursesMap[courseName] = [];
         coursesMap[courseName].push({
           termId: parseInt(termId || 0),
-          grade: grade || "N/A"
+          grade: grade || "ENROLLED BUT NO GRADE"
         });
       });
 
@@ -165,23 +165,25 @@ function fetchStudentData(studentId, verbose = false) {
       let studentData = {
         gpa: null,
         egt: null,
+        termsInAttendance: null
       };
       
       if (student.academicStatuses && Array.isArray(student.academicStatuses)) {
+        // confirm an active undergraduate status
         const undergradCareer = student.academicStatuses.find(status => 
           status.studentCareer?.academicCareer?.code === "UGRD"
         );
         if (undergradCareer) {
           studentData.gpa = undergradCareer.cumulativeGPA?.average || null;
-          // this may need to be double checked - doesn't work for silas's SID (but they're graduated so it's not the typical usecase)
-          try {
-            studentData.egt = undergradCareer.studentPlans[0].expectedGraduationTerm?.id || null;
-          } catch (error) {       
-          }
+          studentData.termsInAttendance = undergradCareer.termsInAttendance || null;
+          undergradCareer.studentPlans.forEach(plan => {
+            if (plan.academicPlan?.type?.code !== "MAJ") return;
+            studentData.egt = plan.expectedGraduationTerm?.id || null;
+          });
         }
       } else {
         Logger.log(`Could not find undergraduate enrollment for ${studentId}. 
-        No GPA or EGT will berecorded.`)
+        No GPA or EGT or termsInAttendance will berecorded.`)
       }
       if (verbose) {
         Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentData, null, 2));
@@ -214,7 +216,7 @@ function writeOutput(sidMap, outputSheetName) {
   });
 
   // Define priority headers and order remaining headers alphabetically
-  const priorityHeaders = ["SID", "gpa", "Admit Term", "egt", "Taken R&C"];
+  const priorityHeaders = ["SID", "gpa", "Admit Term", "egt", "termsInAttendance", "Taken R&C"];
   const otherHeaders = Array.from(allKeys)
     .filter(key => !priorityHeaders.includes(key))
     .sort();
