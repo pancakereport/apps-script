@@ -2,7 +2,7 @@
 
 ## Description of Scripts
 
-* **Partial Program Plan:** Output a program plan that includes all future courses that the applicant lists on their comprehensive review application AND all courses the SIS API reports the applicant being enrolled in. Courses that the applicant says they are enrolled in for the current semester but that the API cannot find are flagged. 
+* **Partial Program Plan:** Output a program plan for each major that the applicant is applying to. Program plans include all future courses that the applicant lists on their comprehensive review application that are relevant to the named major AND all courses the SIS API reports the applicant being enrolled in. Courses that the applicant says they are enrolled in for the current semester but that the API cannot find are flagged. 
 * **Pull Transcript Grades:** Utilize the SIS API to pull all grades for comprehrensive review applicants.
 * **Application Flags:** Identify and summarize important pieces of each comprehensive review application.
 
