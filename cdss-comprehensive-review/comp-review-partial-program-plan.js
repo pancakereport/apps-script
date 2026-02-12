@@ -7,13 +7,23 @@ function onOpen() {
 }
 
 function fullFunction() {
-  const currSem = 2262;
-  const dataMap = getInput();
-  const enrollmentTruth = fetchEnrollmentDataAllStudents(dataMap);
-  const flaggedCurrentEnrollment = verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem);
-  const folderUrl = createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnrollment, currSem, true);
-  // show the success message to the user
-  showFinishedModal(folderUrl);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.toast("Fetching enrollment data and preparing sheets...", "Process Started", -1);
+
+  try {
+    const currSem = 2262;
+    const dataMap = getInput();
+    const enrollmentTruth = fetchEnrollmentDataAllStudents(dataMap);
+    const flaggedCurrentEnrollment = verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem);
+    const folderUrl = createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnrollment, currSem, true);
+    ss.toast("Success!", "Process Complete", 5);
+    showFinishedModal(folderUrl);
+    
+  } catch (e) {
+    ss.toast("An error occurred. Check logs.", "Error", 10);
+    Logger.log("Critical Failure in fullFunction: " + e.toString());
+    SpreadsheetApp.getUi().alert("Process failed: " + e.message);
+  }
 }
 
 /** Read the input data
@@ -389,13 +399,19 @@ function createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnroll
     throw new Error("Could not find a sheet named 'Template'");
   }
 
-  let targetFolder;
   const folderName = "Comprehensive Review 2026 Program Plans";
   const existingFolders = DriveApp.getFoldersByName(folderName);
-
-  targetFolder = existingFolders.hasNext() ? existingFolders.next() : DriveApp.createFolder(folderName);
+  const targetFolder = existingFolders.hasNext() ? existingFolders.next() : DriveApp.createFolder(folderName);
   const targetUrl = targetFolder.getUrl();
   if (verbose) Logger.log("Target Folder URL: " + targetUrl);
+
+  // OPTIMIZATION: index existing files once to avoid DriveApp calls in the loop
+  const existingFilesMap = {};
+  const files = targetFolder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    existingFilesMap[file.getName()] = file.getId();
+  }
 
   const sids = Object.keys(dataMap);
   sids.forEach(sid => {
@@ -404,31 +420,36 @@ function createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnroll
     const responseId = studentData.ResponseId;
     const fileName = responseId + " Program Plan";
 
-    // Check if the file already exists in the target folder
-    const existingFiles = targetFolder.getFilesByName(fileName);
-    let newSheet;
-
-    if (existingFiles.hasNext()) {
-      const existingFile = existingFiles.next();
-      newSheet = SpreadsheetApp.openById(existingFile.getId());
-      
-      if (verbose) Logger.log("Existing sheet found for " + responseId + ". Overwriting data...");
-    } else { // if it doesn't exist, create it
-      newSheet = SpreadsheetApp.create(fileName);
-      const sheetFile = DriveApp.getFileById(newSheet.getId());
-      
-      const copiedSheet = templateSheet.copyTo(newSheet);
-      copiedSheet.setName("Program Plan"); 
-      
-      const defaultSheet = newSheet.getSheetByName("Sheet1");
-      if (defaultSheet) newSheet.deleteSheet(defaultSheet);
-
-      // Move to folder
-      sheetFile.moveTo(targetFolder);
-      
-      if (verbose) Logger.log("Created new sheet for " + responseId);
+    if (index % 10 === 0) {
+      ss.toast(`Processing student ${index + 1} of ${sids.length}...`, "In Progress");
     }
-    writeToStudentSheet(newSheet, studentData, enrollmentTruth[sid], flaggedCurrentEnrollment[sid], currSem, verbose);
+
+    let newSheet;
+    try {
+      if (existingFilesMap[fileName]) {
+        newSheet = SpreadsheetApp.openById(existingFilesMap[fileName]);
+      } else { // if it doesn't exist, create it
+        newSheet = SpreadsheetApp.create(fileName);
+        const sheetFile = DriveApp.getFileById(newSheet.getId());
+        
+        const copiedSheet = templateSheet.copyTo(newSheet);
+        copiedSheet.setName("Program Plan"); 
+        
+        const defaultSheet = newSheet.getSheetByName("Sheet1");
+        if (defaultSheet) newSheet.deleteSheet(defaultSheet);
+
+        sheetFile.moveTo(targetFolder);
+
+        if (verbose) Logger.log("Created new sheet for " + responseId);
+      }
+      writeToStudentSheet(newSheet, studentData, enrollmentTruth[sid], flaggedCurrentEnrollment[sid], currSem, verbose);
+
+      if (index % 10 === 0) {
+        SpreadsheetApp.flush();
+      }
+    } catch (err) {
+      Logger.log(`Failed to process SID ${sid}: ${err.message}`);
+    }
   });
   return targetUrl;
 }
@@ -445,4 +466,3 @@ function showFinishedModal(url) {
   
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Execution Complete');
 }
-
