@@ -2,7 +2,7 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Actions')
-    .addItem('Test Work So Far', 'fullFunction')
+    .addItem('Create Program Plans', 'fullFunction')
     .addToUi();
 }
 
@@ -11,6 +11,9 @@ function fullFunction() {
   const dataMap = getInput();
   const enrollmentTruth = fetchEnrollmentDataAllStudents(dataMap);
   const flaggedCurrentEnrollment = verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem);
+  const folderUrl = createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnrollment, currSem, true);
+  // show the success message to the user
+  showFinishedModal(folderUrl);
 }
 
 /** Read the input data
@@ -21,39 +24,45 @@ function fullFunction() {
  * To be used by later functions
  * */
 function getInput(verbose=false) {
-  // read data
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const inputSheet = ss.getSheetByName("Input"); 
   const data = inputSheet.getDataRange().getValues();
   const headers = data[0];
   const rows = data.slice(1);
   // track the 3 columns for a single requirement together
-  const courseGroups = {}; // Structure: { "LD #1 Calc": { courseIdx: 5, gradeIdx: 6, semIdx: 7 } }
-  // rename headers
-  const updatedHeaders = headers.map((header, index) => {
-    if (header === "Basic Info_4") return "SID";
-    // rename Lower Division: "LD N: <Requirement>#X_1" -> "LD N Requirement course|grade|sem"
-    const ldMatch = header.match(/^LD (\d+)[: \-]+(.+)#(\d+)_1/);
-    if (ldMatch) {
-      const ldNum = ldMatch[1];     
-      const reqName = ldMatch[2].trim(); 
-      const typeCode = ldMatch[3];  
-      const groupKey = `LD #${ldNum} ${reqName}`;
-      const suffix = typeCode === "1" ? "course" : typeCode === "2" ? "grade" : "sem";
-      if (!courseGroups[groupKey]) courseGroups[groupKey] = {};
-      courseGroups[groupKey][suffix] = index;
+  const courseGroups = {}; 
 
-      return `${groupKey} ${suffix}`;
+  const updatedHeaders = headers.map((header, index) => {
+    header = header.toString();
+    if (header === "Basic Info_4") return "SID";
+
+    const groupMatch = header.match(/^(LD|CS Upper Division|DS Upper Division|ST Upper Division).*?#(\d+)/);
+
+    if (groupMatch) {
+      const prefix = groupMatch[1].trim(); 
+      const reqNum = groupMatch[2]; 
+      const groupKey = `${prefix} #${reqNum}`; // e.g. "CS Upper Division #1"
+
+      let suffix = "";
+      if (header.toLowerCase().includes("course")) suffix = "course";
+      else if (header.toLowerCase().includes("grade")) suffix = "grade";
+      else if (header.toLowerCase().includes("sem")) suffix = "sem";
+
+      if (suffix) {
+        if (!courseGroups[groupKey]) courseGroups[groupKey] = {};
+        courseGroups[groupKey][suffix] = index;
+        return `${groupKey} ${suffix}`;
+      }
     }
     return header;
   });
-  // list of headers to keep in identifying_info
+
   const sidIndex = updatedHeaders.indexOf("SID");
   const respIdIndex = updatedHeaders.indexOf("ResponseId");
   const dataMap = {};
 
   // SID Map with SID, ResponseId, and course data partitioned by semester 
- rows.forEach(row => {
+  rows.forEach(row => {
     const sid = row[sidIndex];
     if (!sid) return;
 
@@ -65,24 +74,28 @@ function getInput(verbose=false) {
     // process course groups
     Object.keys(courseGroups).forEach(groupKey => {
       const indices = courseGroups[groupKey];
-      const course = row[indices.course];
-      const grade = row[indices.grade];
-      const semId = row[indices.sem];
+      
+      if (indices.course !== undefined && indices.grade !== undefined && indices.sem !== undefined) {
+        const course = row[indices.course];
+        const grade = row[indices.grade];
+        const semId = row[indices.sem];
 
-    // only add if data exists
-      if (course && grade && semId) {
-        // init semester array
-        if (!dataMap[sid][semId]) {
-          dataMap[sid][semId] = [];
+        if (course && grade && semId) {
+          const cleanSemId = String(semId).trim();
+
+          if (!dataMap[sid][cleanSemId]) {
+            dataMap[sid][cleanSemId] = [];
+          }
+
+          dataMap[sid][cleanSemId].push({
+            course: normalizeCourseName(course),
+            grade: grade
+          });
         }
-
-        dataMap[sid][semId].push({
-          course: normalizeCourseName(course),
-          grade: grade
-        });
       }
     });
   });
+
   verbose && console.log(JSON.stringify(dataMap, null, 2));
   return dataMap;
 }
@@ -135,10 +148,10 @@ function fetchEnrollmentDataSingleStudent(studentId, verbose = false) {
     Logger.log("You appear to have passed in an empty SID (student API). Further investigation may be needed.")
     return null;
   }
-  const url = `https://gateway.api.berkeley.edu/sis/v2/students/${studentId}?id-type=student-id&inc-acad=true&inc-cntc=false&inc-regs=false&inc-attr=false&inc-dmgr=false&inc-work=false&inc-dob=false&inc-gndr=false&affiliation-status=ALL&inc-completed-programs=true&inc-inactive-programs=true`;
+    const url = `https://gateway.api.berkeley.edu/sis/v3/enrollments/students/${studentId}?primary-only=true&enrolled-only=true`;
   const scriptProps = PropertiesService.getScriptProperties();
-  const app_id = scriptProps.getProperty('APP_ID_STUDENT');
-  const app_key = scriptProps.getProperty('APP_KEY_STUDENT');
+  const app_id = scriptProps.getProperty('APP_ID_ENROLLMENT');
+  const app_key = scriptProps.getProperty('APP_KEY_ENROLLMENT');
   const options = {
     'method': 'get',
     'headers': {
@@ -153,6 +166,7 @@ function fetchEnrollmentDataSingleStudent(studentId, verbose = false) {
     const responseCode = response.getResponseCode();
     if (responseCode === 200) {
       const json = JSON.parse(response.getContentText());
+
       const enrollments = json?.apiResponse?.response?.enrollmentsByStudent?.studentEnrollments || [];
 
       let studentSemesters = {};
@@ -160,7 +174,7 @@ function fetchEnrollmentDataSingleStudent(studentId, verbose = false) {
       enrollments.forEach(e => {
         const semId = e?.classSection?.class?.session?.term?.id;
         const courseName = e?.classSection?.class?.course?.displayName;
-        const grade = e?.grades?.[0]?.mark || "ENROLLED";
+        const grade = e?.grades?.[0]?.mark || "Enrolled";
         const units = e?.enrolledUnits?.taken || 0;
 
         if (!semId || !courseName) return;
@@ -174,7 +188,7 @@ function fetchEnrollmentDataSingleStudent(studentId, verbose = false) {
         });
       });
       if (verbose) {
-        Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentData, null, 2));
+        Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentSemesters, null, 2));
       }
       return studentSemesters;
     } else {
@@ -227,7 +241,7 @@ function verifyCurrentEnrollmentSingleStudent(sid, dataMap, enrollmentTruth, cur
 
       if (verbose) {
         Logger.log(`${sid}: Unable to verify current enrollment for ${normalizedInputName}`);
-      } 
+      }
     }
   });
   return unverifiedForThisStudent;
@@ -246,3 +260,189 @@ function verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem, v
   });
   return discrepancies;
 }
+
+// takes in a semester id and returns the plain English meaning
+// or null if the semester id isn't 4 digits
+function idToSem(id) {
+  const idStr = String(id);
+  const lastDigit = idStr.slice(-1);
+  let sem;
+  if (lastDigit == '2') {
+    sem = "Spring";
+  } else if (lastDigit == '5') {
+    sem = "Summer";
+  } else if (lastDigit == '8') {
+    sem = "Fall";
+  } else {
+    return null;
+  }
+  const year = idStr[0] + "0" + idStr[1] + idStr[2]; // first digit, zero, second digit, third digit of id
+  return sem + " " + year;
+}
+
+function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurrentEnrollment, currSem, verbose = false) {
+  const copiedSheet = newSheet.getSheetByName("Program Plan");
+
+  const applicationKeys = Object.keys(studentData).filter(k => k !== "ResponseId" && k !== "SID");
+  const apiKeys = (apiTruth) ? Object.keys(apiTruth) : [];
+  
+  // create a unique sorted list of all semester ids
+  const rawSemesters = [...new Set([...applicationKeys, ...apiKeys])]
+    .filter(key => idToSem(key) !== null)
+    .sort((a, b) => Number(a) - Number(b));
+
+  const firstSem = Number(rawSemesters[0]);
+  const lastSem = Number(rawSemesters[rawSemesters.length - 1]);
+  const allSemesters = [];
+
+  // generate every semester ID ending in 2, 5, 8 between first and last
+  for (let y = Math.floor(firstSem / 10); y <= Math.floor(lastSem / 10); y++) {
+    [2, 5, 8].forEach(suffix => {
+      const id = y * 10 + suffix;
+      if (id >= firstSem && id <= lastSem) allSemesters.push(id);
+    });
+  }
+
+  // group all semesters by academic year
+  const yearsMap = {}; // { 2024: [2248, 2252, 2255] }
+  allSemesters.forEach(key => {
+    const semStr = idToSem(key);
+    const [season, year] = semStr.split(" ");
+    const acadYear = (season === 'Fall') ? Number(year) : Number(year) - 1;
+    if (!yearsMap[acadYear]) yearsMap[acadYear] = [];
+    yearsMap[acadYear].push(key);
+  });
+
+  const sortedYears = Object.keys(yearsMap).sort((a, b) => Number(a) - Number(b));
+
+  copiedSheet.getRange("B1").setValue(studentData.ResponseId);
+
+  const flagGrid = Array.from({length: 5}, () => [""]);
+
+  if (studentFlaggedCurrentEnrollment && studentFlaggedCurrentEnrollment.length > 0) {
+    studentFlaggedCurrentEnrollment.forEach((c, i) => { if (i < 5) flagGrid[i][0] = c; });
+    copiedSheet.getRange(4, 13, 5, 1).setFontWeight("bold").setValues(flagGrid);
+  } else {
+    flagGrid[0][0] = "All courses listed on application verified";
+    copiedSheet.getRange(4, 13, 5, 1).setFontWeight("normal").setValues(flagGrid);
+  }
+
+  let currentRowCursor = 3; // Start writing at row 3 (dynamic after this)
+
+  sortedYears.forEach((acadYear) => {
+    const yearSemKeys = yearsMap[acadYear];
+    let maxCoursesInThisYear = 5;
+
+    // determine the height needed for this year's block
+    yearSemKeys.forEach(key => {
+      let dataCount = 0;
+      if (Number(key) <= currSem) {
+        dataCount = (apiTruth && apiTruth[key]) ? apiTruth[key].length : (studentData[key] ? studentData[key].length : 0);
+      } else {
+        dataCount = (studentData[key]) ? studentData[key].length : 0;
+      }
+      if (dataCount > maxCoursesInThisYear) maxCoursesInThisYear = dataCount;
+    });
+
+    // write the data
+    yearSemKeys.forEach(key => {
+      const semesterStr = idToSem(key);
+      const [season] = semesterStr.split(" ");
+      const colMap = { 'Fall': 1, 'Spring': 5, 'Summer': 9 }; // positions on the spreadsheet
+      const col = colMap[season];
+
+      if (col) {
+
+        // write the semester header (e.g., "Fall 2025")
+        copiedSheet.getRange(currentRowCursor, col).setValue(semesterStr);
+
+        let activeData = (Number(key) <= currSem) 
+          ? (apiTruth && apiTruth[key] ? apiTruth[key] : (studentData[key] || []))
+          : (studentData[key] || []);
+
+        // prepare grid
+        const gridHeight = Math.max(activeData.length, 5);
+        const outputGrid = Array.from({length: gridHeight}, () => ["", "", ""]);
+
+        activeData.forEach((item, i) => {
+          outputGrid[i] = [item.course || "", item.grade || "", item.units || ""];
+        });
+
+        const targetRange = copiedSheet.getRange(currentRowCursor + 1, col, gridHeight, 3);
+        
+        // formatting
+        const formatSource = copiedSheet.getRange(currentRowCursor + 1, col, 1, 3);
+        formatSource.copyTo(targetRange, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+
+        // write the actual data (or 5 empty rows to clear template)
+        targetRange.setValues(outputGrid);
+      }
+    });
+    currentRowCursor += (maxCoursesInThisYear + 2);
+  });
+}
+
+function createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnrollment, currSem, verbose = false) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const templateSheet = ss.getSheetByName("Template");
+  if (!templateSheet) {
+    throw new Error("Could not find a sheet named 'Template'");
+  }
+
+  let targetFolder;
+  const folderName = "Comprehensive Review 2026 Program Plans";
+  const existingFolders = DriveApp.getFoldersByName(folderName);
+
+  targetFolder = existingFolders.hasNext() ? existingFolders.next() : DriveApp.createFolder(folderName);
+  const targetUrl = targetFolder.getUrl();
+  if (verbose) Logger.log("Target Folder URL: " + targetUrl);
+
+  const sids = Object.keys(dataMap);
+  sids.forEach(sid => {
+    const studentData = dataMap[sid];
+
+    const responseId = studentData.ResponseId;
+    const fileName = responseId + " Program Plan";
+
+    // Check if the file already exists in the target folder
+    const existingFiles = targetFolder.getFilesByName(fileName);
+    let newSheet;
+
+    if (existingFiles.hasNext()) {
+      const existingFile = existingFiles.next();
+      newSheet = SpreadsheetApp.openById(existingFile.getId());
+      
+      if (verbose) Logger.log("Existing sheet found for " + responseId + ". Overwriting data...");
+    } else { // if it doesn't exist, create it
+      newSheet = SpreadsheetApp.create(fileName);
+      const sheetFile = DriveApp.getFileById(newSheet.getId());
+      
+      const copiedSheet = templateSheet.copyTo(newSheet);
+      copiedSheet.setName("Program Plan"); 
+      
+      const defaultSheet = newSheet.getSheetByName("Sheet1");
+      if (defaultSheet) newSheet.deleteSheet(defaultSheet);
+
+      // Move to folder
+      sheetFile.moveTo(targetFolder);
+      
+      if (verbose) Logger.log("Created new sheet for " + responseId);
+    }
+    writeToStudentSheet(newSheet, studentData, enrollmentTruth[sid], flaggedCurrentEnrollment[sid], currSem, verbose);
+  });
+  return targetUrl;
+}
+
+function showFinishedModal(url) {
+  const htmlOutput = HtmlService
+    .createHtmlOutput(
+      `<p>All program plans have been generated successfully.</p>
+       <p><a href="${url}" target="_blank" style="font-family: sans-serif; color: #1155cc;">Click here to open the folder</a></p>
+       <button onclick="google.script.host.close()" style="margin-top: 10px;">Close</button>`
+    )
+    .setWidth(350)
+    .setHeight(150);
+  
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Execution Complete');
+}
+
