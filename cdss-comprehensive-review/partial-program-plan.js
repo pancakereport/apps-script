@@ -12,7 +12,10 @@ function fullFunction() {
 
   try {
     const currSem = 2262;
-    const dataMap = getInput();
+    const csReqs = ["LD 1", "LD 2", "LD 4", "LD 6", "LD 7", "LD 8", "LD 9", "CS Upper Division"];
+    const dsReqs = ["LD 1", "LD 2", "LD 4", "LD 5", "LD 6", "LD 7", "LD 10", "DS Upper Division"];
+    const stReqs = ["LD 1", "LD 2", "LD 3", "LD 4", "LD 5", "ST Upper Division"];
+    const dataMap = getInput(csReqs, dsReqs, stReqs);
     const enrollmentTruth = fetchEnrollmentDataAllStudents(dataMap);
     const flaggedCurrentEnrollment = verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem);
     const folderUrl = createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnrollment, currSem, true);
@@ -28,12 +31,19 @@ function fullFunction() {
 
 /** Read the input data
  * Returns a map of {SID: { SID: 1234, ResponseId: 2345,
- *                          semId1: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
- *                          semId2: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
- *                          ...}}
+ *                          cs: {semId1: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
+ *                               semId2: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
+ *                                ...},
+ *                          ds: {semId1: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
+ *                               semId2: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
+ *                                ...},
+ *                          st: {semId1: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
+ *                               semId2: [{course: courseName, grade: grade}, {course: courseName, grade: grade}, ...], 
+ *                                ...},
+ *                          }}
  * To be used by later functions
  * */
-function getInput(verbose=false) {
+function getInput(csReqs, dsReqs, stReqs, verbose=false) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const inputSheet = ss.getSheetByName("Input"); 
   const data = inputSheet.getDataRange().getValues();
@@ -45,6 +55,9 @@ function getInput(verbose=false) {
   const updatedHeaders = headers.map((header, index) => {
     header = header.toString();
     if (header === "Basic Info_4") return "SID";
+    if (header === "Major Ranking_1") return "rank_cs";
+    if (header === "Major Ranking_2") return "rank_ds";
+    if (header === "Major Ranking_3") return "rank_st";
 
     const groupMatch = header.match(/^(LD|CS Upper Division|DS Upper Division|ST Upper Division).*?#(\d+)/);
 
@@ -69,6 +82,9 @@ function getInput(verbose=false) {
 
   const sidIndex = updatedHeaders.indexOf("SID");
   const respIdIndex = updatedHeaders.indexOf("ResponseId");
+  const rankCsIndex = updatedHeaders.indexOf("rank_cs");
+  const rankDsIndex = updatedHeaders.indexOf("rank_ds");
+  const rankStIndex = updatedHeaders.indexOf("rank_st");
   const dataMap = {};
 
   // SID Map with SID, ResponseId, and course data partitioned by semester 
@@ -76,32 +92,50 @@ function getInput(verbose=false) {
     const sid = row[sidIndex];
     if (!sid) return;
 
+    // which major columns aren't empty?
+    const appliedCS = row[rankCsIndex] !== "";
+    const appliedDS = row[rankDsIndex] !== "";
+    const appliedST = row[rankStIndex] !== "";
+
     dataMap[sid] = {
       SID: sid,
-      ResponseId: row[respIdIndex]
+      ResponseId: row[respIdIndex],
     };
+
+    if (appliedCS) dataMap[sid].cs = {};
+    if (appliedDS) dataMap[sid].ds = {};
+    if (appliedST) dataMap[sid].st = {};
 
     // process course groups
     Object.keys(courseGroups).forEach(groupKey => {
       const indices = courseGroups[groupKey];
-      
-      if (indices.course !== undefined && indices.grade !== undefined && indices.sem !== undefined) {
-        const course = row[indices.course];
-        const grade = row[indices.grade];
-        const semId = row[indices.sem];
+      const course = row[indices.course];
+      const grade = row[indices.grade];
+      const semId = row[indices.sem];
 
-        if (course && grade && semId) {
-          const cleanSemId = String(semId).trim();
+      if (course && grade && semId) {
+        const cleanSemId = String(semId).trim();
+        const normalizedCourse = normalizeCourseName(course);
+        const courseData = { course: normalizedCourse, grade: grade };
 
-          if (!dataMap[sid][cleanSemId]) {
-            dataMap[sid][cleanSemId] = [];
+        // helper: push course into the correct major bucket
+        const addToMajor = (majorKey, reqList) => {
+          // return early if they didn't apply to this major
+          if (!dataMap[sid][majorKey]) return;
+          // is the current groupKey (e.g., "LD 1") in the major's requirement list?
+          const matchesReq = reqList.some(req => groupKey.startsWith(req));
+          
+          if (matchesReq) {
+            if (!dataMap[sid][majorKey][cleanSemId]) {
+              dataMap[sid][majorKey][cleanSemId] = [];
+            }
+            dataMap[sid][majorKey][cleanSemId].push(courseData);
           }
+        };
 
-          dataMap[sid][cleanSemId].push({
-            course: normalizeCourseName(course),
-            grade: grade
-          });
-        }
+        addToMajor('cs', csReqs);
+        addToMajor('ds', dsReqs);
+        addToMajor('st', stReqs);
       }
     });
   });
@@ -294,7 +328,8 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
   const copiedSheet = newSheet.getSheetByName("Program Plan");
   copiedSheet.getRange("A3:L100").clearContent();
 
-  const applicationKeys = Object.keys(studentData).filter(k => k !== "ResponseId" && k !== "SID");
+  const majorPlanned = studentData.courses || {};
+  const applicationKeys = Object.keys(majorPlanned);
   const apiKeys = (apiTruth) ? Object.keys(apiTruth) : [];
   
   // create a unique sorted list of all semester ids
@@ -315,7 +350,7 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
   }
 
   // group all semesters by academic year
-  const yearsMap = {}; // { 2024: [2248, 2252, 2255] }
+  const yearsMap = {}; 
   allSemesters.forEach(key => {
     const semStr = idToSem(key);
     const [season, year] = semStr.split(" ");
@@ -338,7 +373,7 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
     copiedSheet.getRange(4, 13, 5, 1).setFontWeight("normal").setValues(flagGrid);
   }
 
-  let currentRowCursor = 3; // Start writing at row 3 (dynamic after this)
+  let currentRowCursor = 3; // start writing at row 3 (dynamic after this)
 
   sortedYears.forEach((acadYear) => {
     const yearSemKeys = yearsMap[acadYear];
@@ -348,9 +383,9 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
     yearSemKeys.forEach(key => {
       let dataCount = 0;
       if (Number(key) <= currSem) {
-        dataCount = (apiTruth && apiTruth[key]) ? apiTruth[key].length : (studentData[key] ? studentData[key].length : 0);
+        dataCount = (apiTruth && apiTruth[key]) ? apiTruth[key].length : (majorPlanned[key] ? majorPlanned[key].length : 0);
       } else {
-        dataCount = (studentData[key]) ? studentData[key].length : 0;
+        dataCount = (majorPlanned[key]) ? majorPlanned[key].length : 0;
       }
       if (dataCount > maxCoursesInThisYear) maxCoursesInThisYear = dataCount;
     });
@@ -368,8 +403,8 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
         copiedSheet.getRange(currentRowCursor, col).setFontWeight("bold").setFontSize(12).setValue(semesterStr);
 
         let activeData = (Number(key) <= currSem) 
-          ? (apiTruth && apiTruth[key] ? apiTruth[key] : (studentData[key] || []))
-          : (studentData[key] || []);
+          ? (apiTruth && apiTruth[key] ? apiTruth[key] : (majorPlanned[key] || []))
+          : (majorPlanned[key] || []);
 
         // prepare grid
         const gridHeight = Math.max(activeData.length, 5);
@@ -406,6 +441,12 @@ function createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnroll
   const targetUrl = targetFolder.getUrl();
   if (verbose) Logger.log("Target Folder URL: " + targetUrl);
 
+  const majorConfig = [
+    {key: 'cs', label: 'Computer Science'},
+    {key: 'ds', label: 'Data Science'},
+    {key: 'st', label: 'Statistics'}
+  ];
+
   // OPTIMIZATION: index existing files once to avoid DriveApp calls in the loop
   const existingFilesMap = {};
   const files = targetFolder.getFiles();
@@ -417,39 +458,47 @@ function createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnroll
   const sids = Object.keys(dataMap);
   sids.forEach((sid, index) => {
     const studentData = dataMap[sid];
-
     const responseId = studentData.ResponseId;
-    const fileName = responseId + " Program Plan";
 
     if (index % 10 === 0) {
       ss.toast(`Processing student ${index + 1} of ${sids.length}...`, "In Progress");
     }
 
-    let newSheet;
-    try {
-      if (existingFilesMap[fileName]) {
-        newSheet = SpreadsheetApp.openById(existingFilesMap[fileName]);
-      } else { // if it doesn't exist, create it
-        newSheet = SpreadsheetApp.create(fileName);
-        const sheetFile = DriveApp.getFileById(newSheet.getId());
+    majorConfig.forEach(config => {
+      // does this major exist for this student?
+      if (studentData[config.key]) {
+        const fileName = `${responseId} ${config.label} Program Plan`;
         
-        const copiedSheet = templateSheet.copyTo(newSheet);
-        copiedSheet.setName("Program Plan"); 
-        
-        const defaultSheet = newSheet.getSheetByName("Sheet1");
-        if (defaultSheet) newSheet.deleteSheet(defaultSheet);
+        const majorSpecificData = {
+          ResponseId: responseId,
+          SID: sid,
+          courses: studentData[config.key]
+        };
 
-        sheetFile.moveTo(targetFolder);
+        let newFile;
+        const existingFiles = targetFolder.getFilesByName(fileName);
 
-        if (verbose) Logger.log("Created new sheet for " + responseId);
+        try {
+          if (existingFilesMap[fileName]) {
+            newSheet = SpreadsheetApp.open(existingFiles.next());
+          } else {// if it doesn't exist, create it
+            newSheet = SpreadsheetApp.create(fileName);
+            const sheetFile = DriveApp.getFileById(newSheet.getId());
+            const copiedSheet = templateSheet.copyTo(newSheet);
+            copiedSheet.setName("Program Plan"); 
+            const defaultSheet = newSheet.getSheetByName("Sheet1");
+            if (defaultSheet) newSheet.deleteSheet(defaultSheet);
+            sheetFile.moveTo(targetFolder);
+            if (verbose) Logger.log("Created new sheet for " + responseId);
+          }
+          writeToStudentSheet(newSheet, majorSpecificData, enrollmentTruth[sid], flaggedCurrentEnrollment[sid], currSem, verbose);
+        } catch (err) {
+          Logger.log(`Failed to process SID ${sid}: ${err.message}`);
+        }
       }
-      writeToStudentSheet(newSheet, studentData, enrollmentTruth[sid], flaggedCurrentEnrollment[sid], currSem, verbose);
-
-      if (index % 10 === 0) {
-        SpreadsheetApp.flush();
-      }
-    } catch (err) {
-      Logger.log(`Failed to process SID ${sid}: ${err.message}`);
+    });
+    if (index % 10 === 0) {
+      SpreadsheetApp.flush();
     }
   });
   return targetUrl;
