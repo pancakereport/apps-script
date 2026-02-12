@@ -292,6 +292,7 @@ function idToSem(id) {
 
 function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurrentEnrollment, currSem, verbose = false) {
   const copiedSheet = newSheet.getSheetByName("Program Plan");
+  copiedSheet.getRange("A3:L100").clearContent();
 
   const applicationKeys = Object.keys(studentData).filter(k => k !== "ResponseId" && k !== "SID");
   const apiKeys = (apiTruth) ? Object.keys(apiTruth) : [];
@@ -364,7 +365,7 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
       if (col) {
 
         // write the semester header (e.g., "Fall 2025")
-        copiedSheet.getRange(currentRowCursor, col).setValue(semesterStr);
+        copiedSheet.getRange(currentRowCursor, col).setFontWeight("bold").setFontSize(12).setValue(semesterStr);
 
         let activeData = (Number(key) <= currSem) 
           ? (apiTruth && apiTruth[key] ? apiTruth[key] : (studentData[key] || []))
@@ -381,7 +382,7 @@ function writeToStudentSheet(newSheet, studentData, apiTruth, studentFlaggedCurr
         const targetRange = copiedSheet.getRange(currentRowCursor + 1, col, gridHeight, 3);
         
         // formatting
-        const formatSource = copiedSheet.getRange(currentRowCursor + 1, col, 1, 3);
+        const formatSource = copiedSheet.getRange(4, col, 1, 3);
         formatSource.copyTo(targetRange, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
 
         // write the actual data (or 5 empty rows to clear template)
@@ -414,7 +415,7 @@ function createFolderWriteToSheet(dataMap, enrollmentTruth, flaggedCurrentEnroll
   }
 
   const sids = Object.keys(dataMap);
-  sids.forEach(sid => {
+  sids.forEach((sid, index) => {
     const studentData = dataMap[sid];
 
     const responseId = studentData.ResponseId;
