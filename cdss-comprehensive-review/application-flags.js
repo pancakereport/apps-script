@@ -664,36 +664,10 @@ function verifyInfo(dataMap, currSem, verbose = false) {
 // student plan includes summer term(s) or term(s) 
 // after the EGT listed on the application or the SIS EGT
 // are courses listed as PL with a semester less than currSem?
-function egtFlags(idInfo, courseInfo, currSem) {
-  const sisEGT = parseInt(idInfo['SIS_EGT']);
-  const appEGT = parseInt(idInfo['EGT']);
-  const retval = [];
-
-  // identify all unique prefixes
-  const prefixes = [...new Set(Object.keys(courseInfo).map(k => k.replace(/(sem|grade|course)$/i, "")))];
-
-  // map prefixes to objects and filter for valid semester data
-  const terms = prefixes.map(p => ({
-    sem: parseInt(courseInfo[`${p}sem`]),
-    grade: courseInfo[`${p}grade`]
-  })).filter(t => !isNaN(t.sem));
-
-  // check if summer term or term after EGT
-  if (terms.some(t => t.sem % 10 === 5 && t.grade === "PL")) {
-    retval.push("Summer semesters planned");
-  }
-  if (!isNaN(appEGT) && terms.some(t => t.sem > appEGT)) {
-    retval.push("Terms planned after application EGT");
-  }
-  if (!isNaN(sisEGT) && terms.some(t => t.sem > sisEGT)) {
-    retval.push("Terms planned after EGT from SIS");
-  }
-
-  if (t.grade === "PL" && Number(t.sem) < currSem) {
-    retval.push(`${p} is planned for ${t.sem} which is not a current or future semester`);
-  }
-  return retval;
-}
+terms.forEach(t => {
+    if (t.grade === "PL" && Number(t.sem) < Number(currSem)) {
+      retval.push(`${t.p} is planned for ${t.sem} which is not a current or future semester`);
+    }
 
 // count num completed (letter grade) for reqs
 function countReqCompleted(courseInfo, reqs) {
