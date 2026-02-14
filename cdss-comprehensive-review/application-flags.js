@@ -9,9 +9,10 @@ function onOpen() {
 function fullFunction() {
   const currSem = 2262;
   const reqListLongId = "1kFe7BUCyapp5GO8SlpFOkidV-8NOH8BzkueIX5tPuV8";
+  const reqMap = getReqListLong(reqListLongId);
   const dataMap = getInput(false);
   cleanCourses(dataMap);
-  verifyInfo(dataMap, currSem, true); // verbose is true right now
+  verifyInfo(dataMap, currSem, false); 
   studentPlanFlags(dataMap, currSem, reqListLongId);
   writeToSheet(dataMap, "Intermediate Processed Data");
 }
@@ -214,25 +215,7 @@ function cleanCourses(dataMap) {
 function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
-  clean = clean.replace(/^DATA\/STAT\s?/, "DATA ");
-  clean = clean.replace(/^DATA \/ STAT\s?/, "DATA ");
-  clean = clean.replace(/^CS\/DATA\s?/, "DATA ");
-  clean = clean.replace(/^CS \/ DATA\s?/, "DATA ");
-  clean = clean.replace(/^COMPSCI\/DATA\s?/, "DATA ");
-  clean = clean.replace(/^COMPSCI \/ DATA\s?/, "DATA ");
-  // in free response students might forget cross listed "C"
-  clean = clean.replace(/^DATA\s?(?!C)(100|104|140)\b/, "DATA C$1");
-  // collapse spaces in department 
-  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[CNW]?\d)/, function(match) {
-    return match.replace(/\s+/g, "");
-  });
-  // ensure space between department and number while accounting
-  // for cross listed courses (C), summer not equiv (N) and web (W)
-  clean = clean.replace(/([A-Z]+?)\s*([CNW]?\d[A-Z0-9]*).*/, "$1 $2");
-
-  // remove N or W if they appear immediately before a digit (ignore C)
-  clean = clean.replace(/([A-Z]+)\s+[NW](\d)/, "$1 $2");
-
+  clean = clean.replace(/^(DATA|CS|COMPSCI)\s?\/\s?(STAT|DATA)\s?/, "DATA ");
   // common department shorthand
   const mapping = {
     "^CS\\b": "COMPSCI",
@@ -244,7 +227,7 @@ function normalizeCourseName(name) {
     "^BIO\\b": "BIOLOGY",
     "^MATHEMATICS\\b": "MATH",
     "^MCB\\b": "MCELLBI",
-    "CEB\\b": "CIVENG"
+    "^CIV\\b": "CIVENG"
   };
 
   for (let pattern in mapping) {
@@ -254,6 +237,22 @@ function normalizeCourseName(name) {
       break; 
     }
   }
+  // collapse spaces in department 
+  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[CNW]?\d)/, function(match) {
+    return match.replace(/\s+/g, "");
+  });
+
+  // Fix "DATA C 100" -> "DATAC 100" (above) -> "DATA C100" 
+  clean = clean.replace(/^DATAC\b/, "DATA C");
+  // "DATA C 100" -> "DATA C100"
+  clean = clean.replace(/([A-Z]+)\s+C\s+(\d)/, "$1 C$2");
+  // ensure space between department and number while accounting
+  // for cross listed courses (C), summer not equiv (N) and web (W)
+  clean = clean.replace(/([A-Z]+)\s*([CNW]?\d[A-Z0-9]*).*/, "$1 $2");
+  // in free response students might forget cross listed "C"
+  clean = clean.replace(/^DATA\s?(?!C)(100|104|140)\b/, "DATA C$1");
+  // remove N or W if they appear immediately before a digit (ignore C)
+  clean = clean.replace(/([A-Z]+)\s+[NW](\d)/, "$1 $2");
 
   return clean;
 }
@@ -699,10 +698,9 @@ function countReqEnrolled(courseInfo, reqs, currSem) {
   Object.keys(courseInfo).forEach(colName => {
     if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
       const baseReqName = colName.replace(" course", "");
-      const gradeVal = courseInfo[baseReqName + " grade"];
       const semVal = courseInfo[baseReqName + " sem"];
       
-      if (semVal == currSem) {
+      if (Number(semVal) === Number(currSem)) {
         total += 1
       }
     }
@@ -812,9 +810,10 @@ function meetsDSAdmitReqBasic(courseInfo) {
 }
 
 // according to https://cdss.berkeley.edu/dsus/academics/declaring-major
-function meetsDSAdmitReq(idInfo, courseInfo, domainMap, currSem) {
+function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
   if (!meetsDSAdmitReqBasic(courseInfo)) return "FALSE: Does not meet requirements for LD 5, LD 1, LD 2, or LD 6";
 
+  const sid = idInfo['SID'];
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
   const termsInAttendance = idInfo["Terms in attendance"];
   const lower_div = ["LD #1", "LD #2", "LD #4", "LD #5", "LD #6", "LD #7", "LD #10"];
@@ -840,6 +839,7 @@ function meetsDSAdmitReq(idInfo, courseInfo, domainMap, currSem) {
       if (numCompleted + numEnrolled == 7) {
         return true;
       } else {
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`)
         return "FALSE: Has not completed or enrolled in 7 lower divs as a third year";
       }
     } else if (termsInAttendance > 6) { // fourth year, beyond
