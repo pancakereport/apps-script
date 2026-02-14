@@ -755,8 +755,9 @@ function getReqListLong(ssId) {
       const data = sheet.getDataRange().getValues();
       data.slice(1).forEach(row => {
         const dept = row[0];
-        const num = row[0].toUpperCase();
-        const courseName = dept + num;
+        const numRaw = row[1];
+        const num = String(numRaw).toUpperCase();
+        const courseName = dept + " " + num;
         statCluster.add(courseName);
       });
       mainMap.set(sheetName, statCluster);
