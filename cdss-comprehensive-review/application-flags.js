@@ -8,6 +8,7 @@ function onOpen() {
 
 function fullFunction() {
   const currSem = 2262;
+  const reqListLongId = "1kFe7BUCyapp5GO8SlpFOkidV-8NOH8BzkueIX5tPuV8";
   const dataMap = getInput(false);
   cleanCourses(dataMap);
   verifyInfo(dataMap, currSem, true); // verbose is true right now
@@ -45,7 +46,8 @@ function getInput(verbose=false) {
   const keepHeaders = [
     "SID", "FY vs TR", "1st Sem", "1st Sem_5_TEXT", "EGT", "EGT_12_TEXT", 
     "Current College", "Current Major", "Change or Add", "CGPA",
-    "Major Ranking_1", "Major Ranking_2", "Major Ranking_3"
+    "Major Ranking_1", "Major Ranking_2", "Major Ranking_3",
+    "1st DE", "2nd DE"
   ];
 
   // SID Map with partitioned data - identifying data and data relating to courses
@@ -697,6 +699,82 @@ function countReqEnrolled(courseInfo, reqs, currSem) {
   return total;
 }
 
+function getReqListLong(ssId) {
+  const ss = SpreadsheetApp.openById(ssId);
+  const allSheets = ss.getSheets();
+  const mainMap = new Map();
+
+  allSheets.forEach(sheet => {
+    const sheetName = sheet.getName();
+    if (sheetName === "DS Domain Emphasis") {
+      const sheet = ss.getSheetByName(sheetName); 
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+
+      const idx = {
+        domain: headers.indexOf("Domain Emphasis"),
+        listing: headers.indexOf("Course Listing"),
+        number: headers.indexOf("Course Number"),
+        division: headers.indexOf("Lower-division/Upper-division"),
+        units: headers.indexOf("Units"),
+        approvedOnly: headers.indexOf("Approved only with this topic (Y/N)"),
+        title: headers.indexOf("Course Title")
+      };
+
+      const domainMap = new Map();
+
+      data.slice(1).forEach(row => {
+        const domainName = row[idx.domain];
+        if (!domainName) return; // skip empty rows
+
+        if (!domainMap.has(domainName)) {
+          domainMap.set(domainName, new Map());
+        }
+
+        const courseKey = `${row[idx.listing]} ${row[idx.number]}`;
+        const isApprovedOnly = row[idx.approvedOnly] === "Y";
+
+        const courseDetails = {
+          division: row[idx.division],
+          units: row[idx.units],
+          approvedOnlyWithTopic: row[idx.approvedOnly],
+          // only include title if 'Approved only with this topic' is Y
+          courseTitle: isApprovedOnly ? row[idx.title] : null
+        };
+        domainMap.get(domainName).set(courseKey, courseDetails);
+      });
+      mainMap.set(sheetName, domainMap);
+    } else if (sheetName === "Stat Cluster") {
+      const statCluster = new Set();
+      const sheet = ss.getSheetByName(sheetName); 
+      const data = sheet.getDataRange().getValues();
+      data.slice(1).forEach(row => {
+        const dept = row[0];
+        const num = row[0].toUpperCase();
+        const courseName = dept + num;
+        statCluster.add(courseName);
+      });
+      mainMap.set(sheetName, statCluster);
+    } else if (sheetName === "CS Technical Electives") {
+      const csTechElectives = {"courses": new Set(), "depts": {}};
+      const sheet = ss.getSheetByName(sheetName); 
+      const data = sheet.getDataRange().getValues();
+      data.slice(2).forEach(row => { // skip first 2 rows
+        const course = row[0];
+        const notes = row[1] || "";
+        if (notes) {
+          const notesArray = notes.split(" ");
+          csTechElectives["depts"].set(course, notes);
+        } else {
+          csTechElectives["courses"].add(course);
+        }
+      });
+      mainMap.set(sheetName, csTechElectives);
+    }
+  });
+  return mainMap;
+}
+
 // checks for passing letter grades (or test scores) in
 // LD 5 + (LD 1 | LD 2 | LD 6)
 function meetsDSAdmitReqBasic(courseInfo) {
@@ -719,7 +797,7 @@ function meetsDSAdmitReqBasic(courseInfo) {
 }
 
 // according to https://cdss.berkeley.edu/dsus/academics/declaring-major
-function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
+function meetsDSAdmitReq(idInfo, courseInfo, domainMap, currSem) {
   if (!meetsDSAdmitReqBasic(courseInfo)) return "FALSE: Does not meet requirements for LD 5, LD 1, LD 2, or LD 6";
 
   const isTransfer = idInfo["FY vs TR"] === "Transfer";
@@ -776,6 +854,114 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
   return false;
 }
 
+// do the courses that applicants list meet DS upper divison major requirements?
+// do the courses listed for domain emphasis belong to the same DE?
+function coursesSatisfyDsReq(idInfo, courseInfo, domainMap, requirements) {
+  const de1 = idInfo["1st DE"];
+  const unverified = [];
+  const oneOfThree = [];
+  // const cidUnits = 0; put in when access to course API is granted
+  const cidCourses = ["ASTRON 128", "BIOENG C142", "CHEM C142", "CHEM C191", "COMPSCI C191", "PHYSICS C191",
+    "COMPSCI 161", "COMPSCI 162", "COMPSCI 164", "COMPSCI 168", "COMPSCI 1619", "COMPSCI 169L", "COMPSCI 170",
+    "COMPSCI 186", "COMPSCI W186", "COMPSCI 188", "CPH C100", "DATA C146", "DATA C101", "DATA 144", "DATA 145",
+    "ECON 140", "ECON 141", "EECS 127", "ELENG 120", "EL ENG 122", "EL ENG 123", "EL ENG 129", "ENVECON C118",
+    "IAS C118", "ESPM 174", "INDENG 115", "INDENG 135", "INDENG 142B", "INDENG 160", "INDENG 164", "INDENG 165",
+    "INDENG 166", "INDENG 173", "INDENG 174", "INFO 159", "INFO 190-1", "MATH 156", "NUCENG 175", "PHYSICS 188",
+    "STAT 135", "STAT 150", "STAT 151A", "STAT 152", "STAT 153", "STAT 158", "STAT 159", "STAT 165", "UGBA 142"
+  ];
+  let cid3, cid4;
+
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && requirements.some(req => colName.startsWith(req))) {
+      const courseName = courseInfo[colName];
+      const baseReqName = colName.replace(" course", "");
+      if (baseReqName === "LD #10 DE") { // domain emphasis
+        const ldDe1 = domainMap.get(de1)?.has(courseName) || "";
+        if (courseName === ldDe1) {
+          return; // continue
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName} for first choice domain emphasis (${de1})`);
+        }
+      } else if (baseReqName === "DS Upper Division#7") {
+        const udDe7 = domainMap.get(de1)?.has(courseName) || "";
+         if (courseName === udDe7) {
+          return; // continue
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName} for first choice domain emphasis (${de1})`);
+        }
+      } else if (baseReqName === "DS Upper Division#8") {
+          const udDe8 = domainMap.get(de1)?.has(courseName) || "";
+         if (courseName === udDe8) {
+          return; // continue
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName} for first choice domain emphasis (${de1})`);
+        }
+      // other upper division courses
+      } else if (baseReqName === "DS Upper Division#1") {
+        if (courseName !== "DATA C100") {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } else if (baseReqName === "DS Upper Division#2") { // probability
+        const acceptedProb = ["DATA C140", "STAT C140", "EECS 126", "ELENG 126", "INDENG 172", "MATH 106", " STAT 134"]
+        if (!acceptedProb.includes(courseName)) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+        if (courseName === "EECS 126") {
+          oneOfThree.push(courseName);
+        }
+      } else if (baseReqName === "DS Upper Division#3") { // computational & inferential depth = 7 units
+        if (!cidCourses.includes(courseName)) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+        cid3 = courseName;
+        if (courseName === "INDENG 173" || courseName === "STAT 150") {
+          oneOfThree.push(courseName);
+        }
+        // cidUnits += ;
+      } else if (baseReqName === "DS Upper Division#4") { // computational & inferential depth = 7 units
+         if (!cidCourses.includes(courseName)) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+        cid4 = courseName;
+        if (courseName === "INDENG 173" || courseName === "STAT 150") {
+          oneOfThree.push(courseName);
+        }
+        // cidUnits += ;
+      } else if (baseReqName === "DS Upper Division#5") { // Modeling, Learning, and Decision-Making 
+        const acceptedMod = ["DATA C182", "COMPSCI C182", "DATA 182", "COMPSCI 182", "DATA 182L", "COMPSCI 182L", 
+          "DATA W182", "COMPSCI W182", "DATA C102", "STAT C102", "INDENG 142A", "STAT 154"
+        ];
+        if (courseName === "DATA 188" && Number(courseInfo[baseReqName + " sem"]) !== 2262) {
+           unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        } else if (!acceptedMod.includes(courseName)) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } else if (baseReqName === "DS Upper Division#6") { // HCE 
+        const acceptedHCE = ["ANTHRO 168", "CYPLAN 101", "DATA C104", "HISTORY C184D", "STS C104", "DIGHUM 100",
+          "ESPM C167", "PUB HLTH C160", "INFO 101", "INFO 188", "ISF 100J", "NWMEDIA 151AC", "PHILOS 121",
+          "POLECON 159", 
+        ];
+        if (courseName === "BIOENG 100" && Number(courseInfo[baseReqName + " sem"]) > 2258) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        } else if (courseName === "AMERSTD 134" || courseName === "AFRICAM 134" || courseName === "AMERSTD C134" || courseName === "AFRICAM C134") {
+          if ( Number(courseInfo[baseReqName + " sem"]) > 2262) {
+            unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+          }
+        } else if (!acceptedHCE.includes(courseName)) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } 
+    }
+  });
+  if (cid3 === cid4) {
+    unverified.push(`The same class ${cid3} was listed for both Computational and Inferential Depth courses`);
+  }
+  if (oneOfThree.length > 1) {
+    unverified.push(`Only one of the following can be used to satisfy major requirements, but ${oneOfThree} are listed`);
+  }
+  return unverified;
+}
+
 // https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=0#gid=0
 function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   // no transfers are eligible for comprehensive review
@@ -816,6 +1002,66 @@ function meetsCSAdmitReq(idInfo, courseInfo, currSem, cs_gpa) {
   } else {
     return "FALSE: GPA below 3.0";
   }
+}
+
+// do the courses that applicants list meet CS upper divison major requirements?
+function coursesSatisfyCsReq(courseInfo, techElectives) {
+  const unverified = [];
+  const courses = new Set();
+  const numsNotAccepted = [199, 198, 197, 195];
+  const numsMaybeNotAccepted = [194, 191, 190];
+  Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && colName.includes("CS Upper Division")) {
+      const courseName = courseInfo[colName];
+      const baseReqName = colName.replace(" course", "");
+      if (baseReqName === "CS Upper Division#1") { // design course
+        courses.add(courseName);
+        const acceptedDesign = ["COMPSCI 152", "COMPSCI 160", "COMPSCI 161", "COMPSCI 162", "COMPSCI 164", 
+          "COMPSCI 168", "COMPSCI 169A", "COMPSCI 169L", "COMPSCI 180", "COMPSCI 182", "COMPSCI W182", 
+          "COMPSCI 184", "COMPSCI 185", "COMPSCI 186", "COMPSCI W186", "ELENG C128", "ELENG 130",
+          "ELENG 140", "ELENG 143", "ELENG 192", "EECS C106A", "EECS C106B", "EECS 149", "EECS 151"];
+        if (!acceptedDesign.includes(courseName)) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } else if (baseReqName === "CS Upper Division#2" || baseReqName === "CS Upper Division#3") { // upper div CS courses
+        const [dept, num] = courseName.split(" ");
+        if (dept !== "COMPSCI") {
+          unverified.push(`${courseName} may not satisfy ${baseReqName} (CS Upper Div)`);
+        } else if (numsNotAccepted.includes(Number(num))) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName} (CS Upper Div)`);
+        } else if (numsMaybeNotAccepted.includes(Number(num))) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName} (CS Upper Div); course may not be technical`);
+        }
+      } else if (baseReqName === "CS Upper Division#4" || baseReqName === "CS Upper Division#5") { // CS/ELENG/EECS upper div 
+        const [dept, num] = courseName.split(" ");
+        if (dept !== "COMPSCI" && dept !== "ELENG" && dept !== "EECS" && dept !== "EE") {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        } else if (numsNotAccepted.includes(Number(num))) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        } else if (numsMaybeNotAccepted.includes(Number(num))) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}; course may not be technical`);
+        }
+      } else if (baseReqName === "CS Upper Division#6") { //technical electives
+        const notAcceptedTechElectives = [199, 198, 197, 196, 195, 194, 190];
+        const [dept, num] = courseName.split(" ");
+        if (notAcceptedTechElectives.includes(Number(num))) {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        } else if (techElectives["courses"].includes(courseName)) {
+          return;
+        } else if (techElectives["depts"].has(dept)) {
+          const notes = techElectives["depts"].get(dept);
+          if (notes !== "All") {
+            if (notes.includes(num)) {
+              unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+            }
+          }
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      }
+    }
+  });
+  return unverified;
 }
 
 // https://docs.google.com/spreadsheets/d/17iOiE6Sfu6IZOPIHT0vadOHjPt34dNLiGLUTla3yAE8/edit?gid=1222050180#gid=1222050180
@@ -901,6 +1147,81 @@ function meetsStAdmitReq(idInfo, courseInfo, currSem) {
   }
 }
 
+// do the courses that applicants list meet ST upper divison major requirements?
+function coursesSatisfyStReq(courseInfo, statCluster) {
+  const unverified = [];
+  let electiveLab = false;
+  const electives = new Set();
+  const clusterDepts = new Set();
+  const clusters = new Set();
+    Object.keys(courseInfo).forEach(colName => {
+    if (colName.includes("course") && colName.includes("ST Upper Division")) {
+      const courseName = courseInfo[colName];
+      const baseReqName = colName.replace(" course", "");
+      if (baseReqName === "ST Upper Division#1") { // core: computing
+        if (courseName === "STAT 133") {
+          return;
+        } else if (courseName === "DATA C100") {
+          unverified.push("Student lists Data C100 for Concepts in Computing with Data UD requirement; Stat 33B also required");
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } else if (baseReqName === "ST Upper Division#2") { // core: probability
+        if (courseName === "STAT 134" || courseName === "DATA C140" || courseName === "EECS 126" || courseName === "MATH 106") {
+          return;
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } else if (baseReqName === "ST Upper Division#3") { // core: statistics 
+        if (courseName !== "STAT 135") {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      } else if (baseReqName === "ST Upper Division#4" || baseReqName === "ST Upper Division#5" ||
+        baseReqName === "ST Upper Division#6") { // electives
+          electives.add(courseName);
+          const acceptedElectivesLab = ["DATA C102", "STAT C102", "DATA 102", "STAT 102", "STAT 151A",
+            "STAT 152", "STAT 153", "STAT 156", "STAT 158", "STAT 159"];
+          const acceptedElectivesNoLab = ["STAT 150", "STAT 155", "STAT 157", "STAT 165"];
+          if (acceptedElectivesLab.includes(courseName)) {
+            electiveLab = true;
+          } else if (!acceptedElectivesNoLab.includes(courseName)) {
+            unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+          } 
+      } else if (baseReqName === "ST Upper Division#7" || baseReqName === "ST Upper Division#8" ||
+        baseReqName === "ST Upper Division#9") { // cluster
+        clusters.add(courseName);
+        if (statCluster.has(courseName)) {
+          clusterDepts.add(courseName.split(" ")[0]);
+        } else {
+          unverified.push(`${courseName} may not satisfy ${baseReqName}`);
+        }
+      }
+    }
+  });
+  if (clusters.size < 3) {
+    unverified.push(`Student choose duplicate courses for cluster: ${Array.from(clusters).join(", ")}`)
+  }
+  if (clusterDepts.has("ECON") && clusterDepts.has("UGBA")) {
+    clusterDepts.delete("UGBA");
+  }
+  if (clusterDepts.has("EECS") && clusterDepts.has("COMPSCI")) {
+    clusterDepts.delete("EECS");
+  }
+  if (clusterDepts.size > 2) {
+    unverified.push(`Student choose cluster courses from more than two departments: ${Array.from(clusterDepts).join(", ")}`)
+  }
+  if (electives.has("STAT 157") && electives.has("STAT 165")) {
+    unverified.push("Student choose both Stat 157 and Stat 165 which may overlap on the topic of Forecasting")
+  }
+  if (electives.size < 3) {
+    unverified.push(`Student choose duplicate electives: ${Array.from(electives).join(", ")}`)
+  }
+  if (!electiveLab) {
+    unverified.push("Student did not choose any electives with a lab");
+  }
+  return unverified;
+}
+
 // calculate GPA for courses in requirements
 // if grade is not verified and SIS grade exists, use SIS grade
 // if grade is not verified and no SIS grade (gradeVal is NA), exclude requirement
@@ -964,7 +1285,8 @@ function identifyProblemGrades(courseInfo, requirements) {
 // check if any courses for major were taken P/NP
 // check if any courses for major receieved grade below C-
 // check if meets admit requirements
-function majorFlags(idInfo, courseInfo, currSem) {
+// (IN PROGRESS) check if proposed courses meet major requirements
+function majorFlags(idInfo, courseInfo, reqMap, currSem) {
   const flags = {};
   // determine which majors the student is applying to
   const majors = [idInfo['First Choice Major'], idInfo['Second Choice Major'], idInfo['Third Choice Major']];
@@ -976,6 +1298,7 @@ function majorFlags(idInfo, courseInfo, currSem) {
     flags.major_gpa_ds = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_ds = identifyProblemGrades(courseInfo, requirements);
     flags.meets_ds_admit_requirements = meetsDSAdmitReq(idInfo, courseInfo, currSem);
+    flags.ds_ud_courses_unable_to_verify_if_approved = coursesSatisfyDsReq(idInfo, courseInfo, reqMap["DS Domain Emphasis"], ["LD #10", "DS Upper Division"]);
   }
   if (hasMajor("Computer Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #6", "LD #7", "LD #8", "LD #9", "CS Upper Division"];
@@ -983,30 +1306,29 @@ function majorFlags(idInfo, courseInfo, currSem) {
     flags.major_gpa_cs = cs_gpa;
     flags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
     flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo, cs_gpa);
+    flags.st_ud_courses_unable_to_verify_if_approved = coursesSatisfyCsReq(courseInfo, reqMap["CS Technical Electives"]);
   } 
   if (hasMajor("Statistics")) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
     flags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
     flags.meets_st_admit_requirements = meetsStAdmitReq(idInfo, courseInfo, currSem);
+    flags.st_ud_courses_unable_to_verify_if_approved = coursesSatisfyStReq(courseInfo, reqMap["Stat Cluster"]);
   }
   return flags;
 }
 
 // flag for student plan doesn't meet major requirements, 
-// TODO verify if listed courses work (upper div)
-function studentPlanFlags(dataMap, currSem) {
+function studentPlanFlags(dataMap, currSem, reqListLongId) {
   const sids = Object.keys(dataMap);
 
   sids.forEach(sid => {
     dataMap[sid].egt_flags = [];
     const idInfo = dataMap[sid].identifying_info;
     const courseInfo = dataMap[sid].course_info;
+    const reqMap = getReqListLong(reqListLongId);
 
     dataMap[sid].egt_flags = egtFlags(idInfo, courseInfo);
-    dataMap[sid].major_flags = majorFlags(idInfo, courseInfo, currSem);
+    dataMap[sid].major_flags = majorFlags(idInfo, courseInfo, reqMap, currSem);
   });
 }
-
-// unnecessary but how to calculate "year"
-// Math.floor(currSem / 10) - Math.floor(firstSem / 10)
