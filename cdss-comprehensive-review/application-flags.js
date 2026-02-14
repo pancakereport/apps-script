@@ -12,7 +12,7 @@ function fullFunction() {
   const dataMap = getInput(false);
   cleanCourses(dataMap);
   verifyInfo(dataMap, currSem, true); // verbose is true right now
-  studentPlanFlags(dataMap, currSem);
+  studentPlanFlags(dataMap, currSem, reqListLongId);
   writeToSheet(dataMap, "Intermediate Processed Data");
 }
 
@@ -756,7 +756,7 @@ function getReqListLong(ssId) {
       });
       mainMap.set(sheetName, statCluster);
     } else if (sheetName === "CS Technical Electives") {
-      const csTechElectives = {"courses": new Set(), "depts": {}};
+      const csTechElectives = {"courses": new Set(), "depts": new Map()};
       const sheet = ss.getSheetByName(sheetName); 
       const data = sheet.getDataRange().getValues();
       data.slice(2).forEach(row => { // skip first 2 rows
@@ -875,25 +875,10 @@ function coursesSatisfyDsReq(idInfo, courseInfo, domainMap, requirements) {
     if (colName.includes("course") && requirements.some(req => colName.startsWith(req))) {
       const courseName = courseInfo[colName];
       const baseReqName = colName.replace(" course", "");
-      if (baseReqName === "LD #10 DE") { // domain emphasis
-        const ldDe1 = domainMap.get(de1)?.has(courseName) || "";
-        if (courseName === ldDe1) {
-          return; // continue
-        } else {
-          unverified.push(`${courseName} may not satisfy ${baseReqName} for first choice domain emphasis (${de1})`);
-        }
-      } else if (baseReqName === "DS Upper Division#7") {
-        const udDe7 = domainMap.get(de1)?.has(courseName) || "";
-         if (courseName === udDe7) {
-          return; // continue
-        } else {
-          unverified.push(`${courseName} may not satisfy ${baseReqName} for first choice domain emphasis (${de1})`);
-        }
-      } else if (baseReqName === "DS Upper Division#8") {
-          const udDe8 = domainMap.get(de1)?.has(courseName) || "";
-         if (courseName === udDe8) {
-          return; // continue
-        } else {
+      // domain emphasis
+      if (baseReqName === "LD #10 DE" || baseReqName === "DS Upper Division#7" || baseReqName === "DS Upper Division#8") {
+        const emphasis = domainMap.get(de1); 
+        if (!emphasis || !emphasis.has(courseName)) {
           unverified.push(`${courseName} may not satisfy ${baseReqName} for first choice domain emphasis (${de1})`);
         }
       // other upper division courses
@@ -1046,7 +1031,7 @@ function coursesSatisfyCsReq(courseInfo, techElectives) {
         const [dept, num] = courseName.split(" ");
         if (notAcceptedTechElectives.includes(Number(num))) {
           unverified.push(`${courseName} may not satisfy ${baseReqName}`);
-        } else if (techElectives["courses"].includes(courseName)) {
+        } else if (techElectives["courses"].has(courseName)) {
           return;
         } else if (techElectives["depts"].has(dept)) {
           const notes = techElectives["depts"].get(dept);
@@ -1298,7 +1283,7 @@ function majorFlags(idInfo, courseInfo, reqMap, currSem) {
     flags.major_gpa_ds = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_ds = identifyProblemGrades(courseInfo, requirements);
     flags.meets_ds_admit_requirements = meetsDSAdmitReq(idInfo, courseInfo, currSem);
-    flags.ds_ud_courses_unable_to_verify_if_approved = coursesSatisfyDsReq(idInfo, courseInfo, reqMap["DS Domain Emphasis"], ["LD #10", "DS Upper Division"]);
+    flags.ds_ud_courses_unable_to_verify_if_approved = coursesSatisfyDsReq(idInfo, courseInfo, reqMap.get("DS Domain Emphasis"), ["LD #10", "DS Upper Division"]);
   }
   if (hasMajor("Computer Science")) {
     requirements = ["LD #1", "LD #2", "LD #4", "LD #6", "LD #7", "LD #8", "LD #9", "CS Upper Division"];
@@ -1306,14 +1291,14 @@ function majorFlags(idInfo, courseInfo, reqMap, currSem) {
     flags.major_gpa_cs = cs_gpa;
     flags.problem_grades_cs = identifyProblemGrades(courseInfo, requirements);
     flags.meets_cs_admit_requirements = meetsCSAdmitReq(idInfo, courseInfo, cs_gpa);
-    flags.st_ud_courses_unable_to_verify_if_approved = coursesSatisfyCsReq(courseInfo, reqMap["CS Technical Electives"]);
+    flags.st_ud_courses_unable_to_verify_if_approved = coursesSatisfyCsReq(courseInfo, reqMap.get("CS Technical Electives"));
   } 
   if (hasMajor("Statistics")) {
     requirements = ["LD #1", "LD #2", "LD #3", "LD #4", "LD #5", "ST Upper Division"];
     flags.major_gpa_st = calculateMajorGPA(courseInfo, requirements);
     flags.problem_grades_st = identifyProblemGrades(courseInfo, requirements);
     flags.meets_st_admit_requirements = meetsStAdmitReq(idInfo, courseInfo, currSem);
-    flags.st_ud_courses_unable_to_verify_if_approved = coursesSatisfyStReq(courseInfo, reqMap["Stat Cluster"]);
+    flags.st_ud_courses_unable_to_verify_if_approved = coursesSatisfyStReq(courseInfo, reqMap.get("Stat Cluster"));
   }
   return flags;
 }
