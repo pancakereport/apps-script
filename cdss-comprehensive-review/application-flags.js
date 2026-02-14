@@ -32,22 +32,24 @@ function getInput(verbose=false) {
   // rename headers
   const updatedHeaders = headers.map(header => {
     if (header === "Basic Info_4") return "SID";
-    // rename Lower Division: "LD N: <Requirement>#X_1" -> "LD N Requirement course|grade|sem"
-    const ldMatch = header.match(/^LD (\d+)[: \-]+(.+)#(\d+)_1/);
+    // rename Lower Division: "LD N: <Requirement> course|grade|sem" or 
+    // "LD N - <Requirement> course|grade|sem"
+    // -> "LD N <Requirement> course|grade|sem"
+    const ldMatch = header.match(/^LD (\d+)[: \-]+(.+)\s(course|grade|sem)$/i);
     if (ldMatch) {
-      const ldNum = ldMatch[1];     
-      const reqName = ldMatch[2].trim(); 
-      const typeCode = ldMatch[3];  
-      const suffix = typeCode === "1" ? "course" : typeCode === "2" ? "grade" : "sem";
+      const ldNum = ldMatch[1];     // The number (e.g., 1)
+      const reqName = ldMatch[2].trim(); // The requirement (e.g., Math 1A)
+      const suffix = ldMatch[3].toLowerCase(); // course, grade, or sem
+      
       return `LD #${ldNum} ${reqName} ${suffix}`;
     }
     return header;
   });
   // list of headers to keep in identifying_info
   const keepHeaders = [
-    "SID", "FY vs TR", "1st Sem", "1st Sem_5_TEXT", "EGT", "EGT_12_TEXT", 
-    "Current College", "Current Major", "Change or Add", "CGPA",
-    "Major Ranking_1", "Major Ranking_2", "Major Ranking_3",
+    "SID", "FY vs TR", "1st Sem", "EGT",
+    "Current College", "Current Major", "CGPA",
+    "CS Ranking", "DS Ranking", "Stats Ranking",
     "1st DE", "2nd DE"
   ];
 
@@ -72,19 +74,11 @@ function getInput(verbose=false) {
     });
     // handle when response is "other" by filling in their text response
     const idInfo = dataMap[sid].identifying_info;
-    if (/other/i.test(idInfo["1st Sem"])) {
-      idInfo["1st Sem"] = idInfo["1st Sem_5_TEXT"];
-    }
-    delete idInfo["1st Sem_5_TEXT"]; 
-    if (/other/i.test(idInfo["EGT"])) {
-      idInfo["EGT"] = idInfo["EGT_12_TEXT"];
-    }
-    delete idInfo["EGT_12_TEXT"]; 
     // pivot Major Ranking
     const majorMap = {
-      "Major Ranking_1": "Computer Science",
-      "Major Ranking_2": "Data Science",
-      "Major Ranking_3": "Statistics"
+      "CS Ranking": "Computer Science",
+      "DS Ranking": "Data Science",
+      "Stats Ranking": "Statistics"
     };
     idInfo["First Choice Major"] = "";
     idInfo["Second Choice Major"] = "";
