@@ -142,6 +142,11 @@ function writeToSheet(dataMap, sheetName) {
       if (h === "Unable to Verify") return (student.unable_to_verify || []).join(", ");
       if (h === "EGT Flags") return (student.egt_flags || []).join(", ");
 
+      if (h.endsWith("_unable_to_verify_if_approved")) {
+        const list = flags[h];
+        return Array.isArray(list) ? list.join("\n• ") : (list ?? "");
+      }
+
       if (h.endsWith(" PNP")) {
         const flagKey = h.replace(" PNP", "");
         return (flags[flagKey]?.pnp || []).join(", ");
