@@ -144,7 +144,7 @@ function writeToSheet(dataMap, sheetName) {
 
       if (h.endsWith("_unable_to_verify_if_approved")) {
         const list = flags[h];
-        return Array.isArray(list) ? list.join("\n• ") : (list ?? "");
+        return Array.isArray(list) ? list.join("\n") : (list ?? "");
       }
 
       if (h.endsWith(" PNP")) {
@@ -215,7 +215,11 @@ function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
   clean = clean.replace(/^DATA\/STAT\s?/, "DATA ");
+  clean = clean.replace(/^DATA \/ STAT\s?/, "DATA ");
   clean = clean.replace(/^CS\/DATA\s?/, "DATA ");
+  clean = clean.replace(/^CS \/ DATA\s?/, "DATA ");
+  clean = clean.replace(/^COMPSCI\/DATA\s?/, "DATA ");
+  clean = clean.replace(/^COMPSCI \/ DATA\s?/, "DATA ");
   // in free response students might forget cross listed "C"
   clean = clean.replace(/^DATA\s?(?!C)(100|104|140)\b/, "DATA C$1");
   // collapse spaces in department 
@@ -238,7 +242,9 @@ function normalizeCourseName(name) {
     "^STATS\\b": "STAT",
     "^ECO\\b": "ECON",
     "^BIO\\b": "BIOLOGY",
-    "^MATHEMATICS\\b": "MATH"
+    "^MATHEMATICS\\b": "MATH",
+    "^MCB\\b": "MCELLBI",
+    "CEB\\b": "CIVENG"
   };
 
   for (let pattern in mapping) {
@@ -736,7 +742,8 @@ function getReqListLong(ssId) {
           domainMap.set(domainName, new Map());
         }
 
-        const courseKey = `${row[idx.listing]} ${row[idx.number]}`;
+        const courseKeyRaw = `${row[idx.listing]} ${row[idx.number]}`;
+        const courseKey = normalizeCourseName(courseKeyRaw);
         const isApprovedOnly = row[idx.approvedOnly] === "Y";
 
         const courseDetails = {
@@ -757,7 +764,8 @@ function getReqListLong(ssId) {
         const dept = row[0];
         const numRaw = row[1];
         const num = String(numRaw).toUpperCase();
-        const courseName = dept + " " + num;
+        const courseNameRaw = dept + " " + num;
+        const courseName = normalizeCourseName(courseNameRaw);
         statCluster.add(courseName);
       });
       mainMap.set(sheetName, statCluster);
@@ -766,7 +774,8 @@ function getReqListLong(ssId) {
       const sheet = ss.getSheetByName(sheetName); 
       const data = sheet.getDataRange().getValues();
       data.slice(2).forEach(row => { // skip first 2 rows
-        const course = row[0];
+        const courseRaw = row[0];
+        const course = normalizeCourseName(courseRaw);
         const notes = row[1] || "";
         if (notes) {
           const notesArray = notes.split(" ");
@@ -868,10 +877,11 @@ function coursesSatisfyDsReq(idInfo, courseInfo, domainMap, requirements) {
   const oneOfThree = [];
   // const cidUnits = 0; put in when access to course API is granted
   const cidCourses = ["ASTRON 128", "BIOENG C142", "CHEM C142", "CHEM C191", "COMPSCI C191", "PHYSICS C191",
-    "COMPSCI 161", "COMPSCI 162", "COMPSCI 164", "COMPSCI 168", "COMPSCI 1619", "COMPSCI 169L", "COMPSCI 170",
+    "COMPSCI 161", "COMPSCI 162", "COMPSCI 164", "COMPSCI 168", "COMPSCI 169", "COMPSCI 169L", "COMPSCI 169A",
+    "COMPSCI W169", "COMPSCI W169A", "COMPSCI 170", "INDENG 165", "DATA 101",
     "COMPSCI 186", "COMPSCI W186", "COMPSCI 188", "CPH C100", "DATA C146", "DATA C101", "DATA 144", "DATA 145",
-    "ECON 140", "ECON 141", "EECS 127", "ELENG 120", "EL ENG 122", "EL ENG 123", "EL ENG 129", "ENVECON C118",
-    "IAS C118", "ESPM 174", "INDENG 115", "INDENG 135", "INDENG 142B", "INDENG 160", "INDENG 164", "INDENG 165",
+    "ECON 140", "ECON 141", "EECS 127", "ELENG 120", "ELENG 122", "ELENG 123", "ELENG 129", "ENVECON C118",
+    "IAS C118", "ESPM 174", "INDENG 115", "INDENG 135", "INDENG 142B", "INDENG 160", "INDENG 162", "INDENG 164",
     "INDENG 166", "INDENG 173", "INDENG 174", "INFO 159", "INFO 190-1", "MATH 156", "NUCENG 175", "PHYSICS 188",
     "STAT 135", "STAT 150", "STAT 151A", "STAT 152", "STAT 153", "STAT 158", "STAT 159", "STAT 165", "UGBA 142"
   ];
@@ -893,7 +903,7 @@ function coursesSatisfyDsReq(idInfo, courseInfo, domainMap, requirements) {
           unverified.push(`${courseName} may not satisfy ${baseReqName}`);
         }
       } else if (baseReqName === "DS Upper Division#2") { // probability
-        const acceptedProb = ["DATA C140", "STAT C140", "EECS 126", "ELENG 126", "INDENG 172", "MATH 106", " STAT 134"]
+        const acceptedProb = ["DATA C140", "STAT C140", "EECS 126", "ELENG 126", "INDENG 172", "MATH 106", "STAT 134"]
         if (!acceptedProb.includes(courseName)) {
           unverified.push(`${courseName} may not satisfy ${baseReqName}`);
         }
@@ -920,7 +930,7 @@ function coursesSatisfyDsReq(idInfo, courseInfo, domainMap, requirements) {
         // cidUnits += ;
       } else if (baseReqName === "DS Upper Division#5") { // Modeling, Learning, and Decision-Making 
         const acceptedMod = ["DATA C182", "COMPSCI C182", "DATA 182", "COMPSCI 182", "DATA 182L", "COMPSCI 182L", 
-          "DATA W182", "COMPSCI W182", "DATA C102", "STAT C102", "INDENG 142A", "STAT 154"
+          "DATA W182", "COMPSCI W182", "COMPSCI 189", "DATA C102", "STAT C102", "DATA 102", "INDENG 142A", "STAT 154"
         ];
         if (courseName === "DATA 188" && Number(courseInfo[baseReqName + " sem"]) !== 2262) {
            unverified.push(`${courseName} may not satisfy ${baseReqName}`);
