@@ -10,9 +10,9 @@ function fullFunction() {
   const currSem = 2262;
   const reqListLongId = "1kFe7BUCyapp5GO8SlpFOkidV-8NOH8BzkueIX5tPuV8";
   const reqMap = getReqListLong(reqListLongId);
-  const dataMap = getInput(true);
+  const dataMap = getInput(false);
   cleanCourses(dataMap);
-  verifyInfo(dataMap, currSem, false); 
+  verifyInfo(dataMap, currSem, true); 
   studentPlanFlags(dataMap, currSem, reqListLongId);
   writeToSheet(dataMap, "Intermediate Processed Data");
 }
@@ -37,8 +37,8 @@ function getInput(verbose=false) {
     // -> "LD N <Requirement> course|grade|sem"
     const ldMatch = header.match(/^LD (\d+)[: \-]+(.+)\s(course|grade|sem)$/i);
     if (ldMatch) {
-      const ldNum = ldMatch[1];     // The number (e.g., 1)
-      const reqName = ldMatch[2].trim(); // The requirement (e.g., Math 1A)
+      const ldNum = ldMatch[1];
+      const reqName = ldMatch[2].trim();
       const suffix = ldMatch[3].toLowerCase(); // course, grade, or sem
       
       return `LD #${ldNum} ${reqName} ${suffix}`;
@@ -66,8 +66,10 @@ function getInput(verbose=false) {
 
     updatedHeaders.forEach((header, index) => {
       const val = row[index];
-      if (header.includes("grade") || header.includes("sem") || header.includes("course")) {
+      if (header.includes("grade") || header.includes("course")) {
         dataMap[sid].course_info[header] = val;
+      } else if (header.includes("sem")) {
+        dataMap[sid].course_info[header] = semShortToId(val);
       } else if (keepHeaders.includes(header)){
         dataMap[sid].identifying_info[header] = val;
       }
@@ -412,7 +414,7 @@ function semShortToId(sem) {
 
   // extract semester prefix and the year digits
   const match = s.match(/^(sp|su|fa)(\d{2})$/);
-  if (!match) return "";
+  if (!match) return sem;
   const prefix = match[1];
   const yearShort = match[2]; 
   let semester_digit;
@@ -424,7 +426,7 @@ function semShortToId(sem) {
     semester_digit = "8";
   }
   const id = "2" + yearShort + semester_digit;
-  return id;
+  return Number(id);
 }
 
 // helper function that turns semester names
@@ -463,7 +465,7 @@ function getHighestGrade(gradeList) {
 function verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verbose) {
   const idInfo = dataMap[sid].identifying_info;
   // ADMIT TERM
-  const firstSemId = semShortToId(idInfo["1st Sem"]);
+  const firstSemId = idInfo["1st Sem"];
   dataMap[sid].identifying_info["1st Sem ID"] = firstSemId;
   // if a student has a summer admit term, push them to the following fall
   const rawAdmitTerm = enrollmentTruth["Admit Term"];
@@ -471,12 +473,12 @@ function verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verb
     ? Number(rawAdmitTerm) + 3 
     : Number(rawAdmitTerm);
   if (firstSemId != rawAdmitTerm && firstSemId != adjustedAdmitTerm) {
-    verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which translates to ${firstSemId} and doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
+    verbose && Logger.log(`${sid} admit term: ${idInfo["1st Sem"]} which doesn't match SIS ${enrollmentTruth["Admit Term"]}`);
     dataMap[sid].unable_to_verify.push("1st Sem");
   }
   // EGT
-  if (semShortToId(idInfo["EGT"]) != studentTruth.egt) {
-    verbose && Logger.log(`${sid} stated egt: ${idInfo["EGT"]} which translates to ${semShortToId(idInfo["EGT"])} and doesn't match SIS ${studentTruth.egt}`);
+  if (idInfo["EGT"] != studentTruth.egt) {
+    verbose && Logger.log(`${sid} stated egt: ${idInfo["EGT"]} which doesn't match SIS ${studentTruth.egt}`);
     dataMap[sid].unable_to_verify.push("EGT");
   }
   // GPA, allow for minor rounding differences
@@ -541,12 +543,15 @@ function verifyIdentifyingInfo(sid, dataMap, studentTruth, enrollmentTruth, verb
 // helper to verify course grade and semester information
 function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
   const courseInfo = dataMap[sid].course_info;
+  if (verbose) {
+    Logger.log(`${sid} Initial State: ${JSON.stringify(dataMap[sid].course_info)}`);
+  }
   Object.keys(courseInfo).forEach(colName => {
     if (colName.includes("grade")) {
       const gradeVal = courseInfo[colName];
       const baseReqName = colName.replace(" grade", "");
       const courseName = courseInfo[baseReqName + " course"];
-      const semVal = courseInfo[baseReqName + " sem"];
+      const semVal = Number(courseInfo[baseReqName + " sem"]);
       let unitsFound = 0;
 
       // SKIP for transfers, test scores, future classes beyond currSem, and placeholders
@@ -569,19 +574,20 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
         ];
 
         for (const variant of variants) {
-          const apiSem = enrollmentTruth[variant.termId];
+          const apiSem = Number(enrollmentTruth[variant.termId]);
           const apiGrade = enrollmentTruth[variant.grade];
 
-          if (semVal == currSem) {
-            // We only care about the API record if it's also for the current semester
-            if (apiSem == currSem) {
-              foundMatch = true;
-              break; 
-            } else {
-              // record found for this course, but it's NOT for currSem; let the loop 
-              // continue to see if another 'attempt' matches the currSem.
-              continue; 
+
+          // if the API shows they are currently in a course, count it 
+          // as a match regardless of the student's semVal
+          if (apiSem === currSem) {
+            foundMatch = true;
+            unitsFound = enrollmentTruth[variant.units] || 0;
+            if (semVal !== currSem || gradeVal !== "PL") {
+              dataMap[sid].course_info[baseReqName + " sem"] = currSem;
+              dataMap[sid].course_info[baseReqName + " grade"] = "PL";
             }
+            break;
           }
           if (apiGrade !== undefined && apiGrade !== null) {
             const formattedApiGrade = apiGrade.toString().toUpperCase();
@@ -625,6 +631,9 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
       }
     }
   });
+  if (verbose) {
+    Logger.log(`${sid} Final State: ${JSON.stringify(dataMap[sid].course_info)}`);  
+  }
 }
 
 
@@ -632,10 +641,10 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
  * - Do reported 1st Sem, EGT, CGPA, Current College, and Current Major match SIS?
  * - Flag courses where grade doesn't line up with SIS
  *   excluding transfer courses and test scores.
- *   * does not check if semester matches listed, just that grade matches
+ *   * if semester does not match listed, semester is updated. Same for grade
  *   * some cross listed courses may be flagged depending on student responses
  *     courses with N or W in the number are treated the same as without
- *     and fall program for freshman courses (begin with X) are treated as normal 
+ *     and fall program for freshman courses (beginning with X) are treated as normal 
  * 
  * Returns dataMap with a new key for each SID:
  * {SID: { identifying_info: {col: val, ...}, now including 1st Sem ID and termsInAttendance
@@ -664,10 +673,38 @@ function verifyInfo(dataMap, currSem, verbose = false) {
 // student plan includes summer term(s) or term(s) 
 // after the EGT listed on the application or the SIS EGT
 // are courses listed as PL with a semester less than currSem?
-terms.forEach(t => {
+function egtFlags(idInfo, courseInfo, currSem) {
+  const sisEGT = parseInt(idInfo['SIS_EGT']);
+  const appEGT = parseInt(idInfo['EGT']);
+  const retval = [];
+
+  // identify all unique prefixes
+  const prefixes = [...new Set(Object.keys(courseInfo).map(k => k.replace(/(sem|grade|course)$/i, "")))];
+
+  // map prefixes to objects and filter for valid semester data
+  const terms = prefixes.map(p => ({
+    sem: parseInt(courseInfo[`${p}sem`]),
+    grade: courseInfo[`${p}grade`]
+  })).filter(t => !isNaN(t.sem));
+
+  // check if summer term or term after EGT
+  if (terms.some(t => t.sem % 10 === 5 && t.grade === "PL")) {
+    retval.push("Summer semesters planned");
+  }
+  if (!isNaN(appEGT) && terms.some(t => t.sem > appEGT)) {
+    retval.push("Terms planned after application EGT");
+  }
+  if (!isNaN(sisEGT) && terms.some(t => t.sem > sisEGT)) {
+    retval.push("Terms planned after EGT from SIS");
+  }
+
+  terms.forEach(t => {
     if (t.grade === "PL" && Number(t.sem) < Number(currSem)) {
       retval.push(`${t.p} is planned for ${t.sem} which is not a current or future semester`);
     }
+  });
+  return retval;
+}
 
 // count num completed (letter grade) for reqs
 function countReqCompleted(courseInfo, reqs) {
