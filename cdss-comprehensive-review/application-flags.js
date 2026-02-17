@@ -712,7 +712,6 @@ function countReqCompleted(courseInfo, reqs) {
   const notLetterGrade = ["PL", "P", "NP", "NA", "ENROLLED BUT NO GRADE", "I"];
   let total = 0;
   // const courses = [];
-  colName.startsWith(req + " ")
 
   Object.keys(courseInfo).forEach(colName => {
     const isExactMatch = reqs.some(req => colName.startsWith(req + " "));
