@@ -12,9 +12,9 @@ function fullFunction() {
 
   try {
     const currSem = 2262;
-    const csReqs = ["LD 1", "LD 2", "LD 4", "LD 6", "LD 7", "LD 8", "LD 9", "CS Upper Division"];
-    const dsReqs = ["LD 1", "LD 2", "LD 4", "LD 5", "LD 6", "LD 7", "LD 10", "DS Upper Division"];
-    const stReqs = ["LD 1", "LD 2", "LD 3", "LD 4", "LD 5", "ST Upper Division"];
+    const csReqs = ["LD 1", "LD 2", "LD 4", "LD 6", "LD 7", "LD 8", "LD 9", "CS UD"];
+    const dsReqs = ["LD 1", "LD 2", "LD 4", "LD 5", "LD 6", "LD 7", "LD 10", "DS UD"];
+    const stReqs = ["LD 1", "LD 2", "LD 3", "LD 4", "LD 5", "ST UD"];
     const dataMap = getInput(csReqs, dsReqs, stReqs);
     const enrollmentTruth = fetchEnrollmentDataAllStudents(dataMap);
     const flaggedCurrentEnrollment = verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem);
@@ -54,17 +54,16 @@ function getInput(csReqs, dsReqs, stReqs, verbose=false) {
 
   const updatedHeaders = headers.map((header, index) => {
     header = header.toString();
-    if (header === "Basic Info_4") return "SID";
-    if (header === "Major Ranking_1") return "rank_cs";
-    if (header === "Major Ranking_2") return "rank_ds";
-    if (header === "Major Ranking_3") return "rank_st";
+    if (header === "CS Ranking") return "rank_cs";
+    if (header === "DS Ranking") return "rank_ds";
+    if (header === "Stats Ranking") return "rank_st";
 
-    const groupMatch = header.match(/^(LD|CS Upper Division|DS Upper Division|ST Upper Division).*?#(\d+)/);
+    const groupMatch = header.match(/^(LD|CS UD|DS UD|ST UD).*?#(\d+)/);
 
     if (groupMatch) {
       const prefix = groupMatch[1].trim(); 
       const reqNum = groupMatch[2]; 
-      const groupKey = `${prefix} #${reqNum}`; // e.g. "CS Upper Division #1"
+      const groupKey = `${prefix} #${reqNum}`; // e.g. "CS UD #1"
 
       let suffix = "";
       if (header.toLowerCase().includes("course")) suffix = "course";
@@ -111,7 +110,8 @@ function getInput(csReqs, dsReqs, stReqs, verbose=false) {
       const indices = courseGroups[groupKey];
       const course = row[indices.course];
       const grade = row[indices.grade];
-      const semId = row[indices.sem];
+      const sem = row[indices.sem];
+      const semId = semShortToId(sem);
 
       if (course && grade && semId) {
         const cleanSemId = String(semId).trim();
@@ -144,43 +144,50 @@ function getInput(csReqs, dsReqs, stReqs, verbose=false) {
   return dataMap;
 }
 
-// helper function to get course names that will more closely match API
+// helper function to get course names that will (mostly) match with API
 function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
-  clean = clean.replace(/^DATA\/STAT\s?/, "DATA ");
-  clean = clean.replace(/^CS\/DATA\s?/, "DATA ");
-  // in free response students might forget cross listed "C"
-  clean = clean.replace(/^DATA\s?(?!C)(100|104|140)\b/, "DATA C$1");
-  // collapse spaces in department 
-  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[CNW]?\d)/, function(match) {
-    return match.replace(/\s+/g, "");
-  });
-  // ensure space between department and number while accounting
-  // for cross listed courses (C), summer not equiv (N) and web (W)
-  clean = clean.replace(/([A-Z]+?)\s*([CNW]?\d[A-Z0-9]*).*/, "$1 $2");
-
-  // remove N or W if they appear immediately before a digit (ignore C)
-  clean = clean.replace(/([A-Z]+)\s+[NW](\d)/, "$1 $2");
-
+  clean = clean.replace(/[()]/g, ""); // remove parenthesis 
+  clean = clean.replace(/^(DATA|CS|COMPSCI)\s?\/\s?(STAT|DATA)\s?/, "DATA ");
   // common department shorthand
   const mapping = {
-    "^CS\\b": "COMPSCI",
-    "^EE\\b": "EECS",
-    "^SOCIOLOGY\\b": "SOCIOL",
-    "^STATISTICS\\b": "STAT",
-    "^STATS\\b": "STAT",
-    "^ECO\\b": "ECON",
-    "^BIO\\b": "BIOLOGY",
-    "^MATHEMATICS\\b": "MATH"
+    "^CS(?=\\b|\\d)": "COMPSCI",
+    "^EE(?=\\b|\\d)": "EECS",
+    "^SOCIOLOGY(?=\\b|\\d)": "SOCIOL",
+    "^STATISTICS(?=\\b|\\d)": "STAT",
+    "^STATS(?=\\b|\\d)": "STAT",
+    "^ECO(?=\\b|\\d)": "ECON",
+    "^BIO(?=\\b|\\d)": "BIOLOGY",
+    "^MATHEMATICS(?=\\b|\\d)": "MATH",
+    "^MCB(?=\\b|\\d)": "MCELLBI",
+    "^CIV(?=\\b|\\d)": "CIVENG",
+    "^PHIL(?=\\b|\\d)": "PHILOS",
   };
-
   for (let pattern in mapping) {
     let re = new RegExp(pattern, "i");
     if (re.test(clean)) {
       clean = clean.replace(re, mapping[pattern]);
       break; 
     }
+  }
+
+  // collapse spaces in multi-word departments (e.g., "IND ENG" -> "INDENG")
+  // stop before hitting a digit OR a standalone [CNW] + digit
+  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[CNW]?\s*\d)/, function(match) {
+    return match.replace(/\s+/g, "");
+  });
+
+  // separate dept from num
+  // capture: 1. dept, 2. optional Prefix (CNW), 3. num
+  const parts = clean.match(/^([A-Z]{2,})\s*([CNW])?\s*(\d.*)$|^([A-Z])\s*([CNW])?\s*(\d.*)$/);
+  
+  if (parts) {
+    // If it's a long dept name (like ECON), parts[1] is the name.
+    // If it's a single-letter dept (not common here), parts[4] is the name.
+    let dept = parts[1] || parts[4];
+    let num = parts[3] || parts[6];
+    return dept + " " + num;
   }
 
   return clean;
@@ -303,6 +310,28 @@ function verifyCurrentEnrollmentAllStudents(dataMap, enrollmentTruth, currSem, v
     }
   });
   return discrepancies;
+}
+
+// helper function that turns semester names
+// like "Sp26" to ids
+function semShortToId(sem) {
+  const s = String(sem).toLowerCase().trim();
+
+  // extract semester prefix and the year digits
+  const match = s.match(/^(sp|su|fa)(\d{2})$/);
+  if (!match) return sem;
+  const prefix = match[1];
+  const yearShort = match[2]; 
+  let semester_digit;
+  if (prefix === "sp") {
+    semester_digit = "2";
+  } else if (prefix === "su") {
+    semester_digit = "5";
+  } else if (prefix === "fa") {
+    semester_digit = "8";
+  }
+  const id = "2" + yearShort + semester_digit;
+  return Number(id);
 }
 
 // takes in a semester id and returns the plain English meaning
