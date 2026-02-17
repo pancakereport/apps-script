@@ -31,7 +31,6 @@ function getInput(verbose=false) {
   const rows = data.slice(1);
   // rename headers
   const updatedHeaders = headers.map(header => {
-    if (header === "Basic Info_4") return "SID";
     // rename Lower Division: "LD N: <Requirement> course|grade|sem" or 
     // "LD N - <Requirement> course|grade|sem"
     // -> "LD N <Requirement> course|grade|sem"
@@ -158,17 +157,6 @@ function writeToSheet(dataMap, sheetName) {
         return (typeof val === 'object' && val !== null) ? JSON.stringify(val) : (val ?? "");
       }
 
-      // // major flags (prefixed with "Flag: " above)
-      // if (h.startsWith("Flag: ")) {
-      //   const flagKey = h.replace("Flag: ", "");
-      //   const val = flags[flagKey];
-      //   // If the value is an object (like problem_grades), stringify it nicely
-      //   if (typeof val === 'object' && val !== null) {
-      //     return JSON.stringify(val); 
-      //   }
-      //   return val ?? "";
-      // }
-      // standard columns
       return student.identifying_info[h] ?? student.course_info[h] ?? "";
     });
   });
@@ -211,6 +199,7 @@ function cleanCourses(dataMap) {
 function normalizeCourseName(name) {
   // capitalize and trim
   let clean = name.toString().toUpperCase().trim();
+  clean = clean.replace(/[()]/g, ""); // remove parenthesis 
   clean = clean.replace(/^(DATA|CS|COMPSCI)\s?\/\s?(STAT|DATA)\s?/, "DATA ");
   // common department shorthand
   const mapping = {
@@ -545,18 +534,20 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
   const courseInfo = dataMap[sid].course_info;
   if (verbose) {
     Logger.log(`${sid} Initial State: ${JSON.stringify(dataMap[sid].course_info)}`);
+    Logger.log(`${sid} Enrollment Truth: ${JSON.stringify(enrollmentTruth)}`);
   }
   Object.keys(courseInfo).forEach(colName => {
     if (colName.includes("grade")) {
       const gradeVal = courseInfo[colName];
       const baseReqName = colName.replace(" grade", "");
       const courseName = courseInfo[baseReqName + " course"];
-      const semVal = Number(courseInfo[baseReqName + " sem"]);
+      const semValStr = courseInfo[baseReqName + " sem"];
+      const semVal = Number(semValStr);
       let unitsFound = 0;
 
       // SKIP for transfers, test scores, future classes beyond currSem, and placeholders
-      const isTransfer = /transfer/i.test(courseName) || /transfer/i.test(semVal);
-      if (semVal > currSem || semVal === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
+      const isTransfer = /transfer/i.test(courseName) || /transfer/i.test(semValStr);
+      if (semVal > currSem || semValStr === "Test Score" || isTransfer || !courseName || courseName.toLowerCase() === "other") return;
 
       // try to find a grade match across attempts 1, 2, and 3
       let foundMatch = false;
@@ -577,6 +568,13 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
           const apiSem = Number(enrollmentTruth[variant.termId]);
           const apiGrade = enrollmentTruth[variant.grade];
 
+          // incompletes
+          if (apiGrade === "I") {
+            foundMatch = true;
+            dataMap[sid].course_info[baseReqName + " grade"] = "I";
+            verbose && Logger.log(`${sid} has an Incomplete recorded for ${courseName} satisfying requirement ${baseReqName}`);
+            break;
+          }
 
           // if the API shows they are currently in a course, count it 
           // as a match regardless of the student's semVal
@@ -613,6 +611,7 @@ function verifyCourseInfo(sid, dataMap, enrollmentTruth, currSem, verbose) {
       if (!foundMatch) {
         dataMap[sid].unable_to_verify.push(baseReqName);
         if (verbose) {
+          // "PL" for current or past semester is caught here
           if (gradeVal === "PL") {
             Logger.log(`${sid}: API doesn't have a current enrollment record of ${courseName} for requirement ${baseReqName}`);
           } else {
@@ -670,9 +669,11 @@ function verifyInfo(dataMap, currSem, verbose = false) {
   return dataMap;
 }
 
-// student plan includes summer term(s) or term(s) 
-// after the EGT listed on the application or the SIS EGT
-// are courses listed as PL with a semester less than currSem?
+/** Flag all of the following:
+ *    student plan includes summer term(s)
+ *    student plan includes term(s) after the EGT listed on the application or the SIS EGT
+ *    requirements in which a course semester is listed as "PL" and the semester is less than currSem
+ */
 function egtFlags(idInfo, courseInfo, currSem) {
   const sisEGT = parseInt(idInfo['SIS_EGT']);
   const appEGT = parseInt(idInfo['EGT']);
@@ -710,23 +711,28 @@ function egtFlags(idInfo, courseInfo, currSem) {
 function countReqCompleted(courseInfo, reqs) {
   const notLetterGrade = ["PL", "P", "NP", "NA", "ENROLLED BUT NO GRADE", "I"];
   let total = 0;
+  const courses = [];
 
   Object.keys(courseInfo).forEach(colName => {
     if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
       const baseReqName = colName.replace(" course", "");
       const gradeVal = courseInfo[baseReqName + " grade"];
+      Logger.log(baseReqName + " " + gradeVal);
       
       if (!notLetterGrade.includes(gradeVal)) {
         total += 1
+        courses.push(baseReqName);
       }
     }
   });
+  courses.length > 0 && Logger.log(`Requirements Completed: ${courses}`)
   return total;
 }
 
 // count num enrolled of courses in reqs
 function countReqEnrolled(courseInfo, reqs, currSem) {
   let total = 0;
+  const courses = [];
 
   Object.keys(courseInfo).forEach(colName => {
     if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
@@ -735,12 +741,15 @@ function countReqEnrolled(courseInfo, reqs, currSem) {
       
       if (Number(semVal) === Number(currSem)) {
         total += 1
+        courses.push(baseReqName);
       }
     }
   });
+  courses.length > 0 && Logger.log(`Requirements Enrolled: ${courses}`)
   return total;
 }
 
+// some requirements have long lists of courses that satisfy them. here, grab those lists from a separate sheet
 function getReqListLong(ssId) {
   const ss = SpreadsheetApp.openById(ssId);
   const allSheets = ss.getSheets();
@@ -858,6 +867,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled >= 3) {
         return true;
       } else {
+        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 3 lower divs as a first year`);
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 3 lower divs as a first year";
       }
     } else if (termsInAttendance < 5) { // second year
@@ -865,6 +876,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled >= 5) {
         return true;
       } else {
+        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 5 lower divs as a second year`);
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 5 lower divs as a second year";
       }
     } else if (termsInAttendance < 7) { // third year
@@ -872,25 +885,32 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled == 7) {
         return true;
       } else {
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`)
+        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 7 lower divs as a third year`);
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 7 lower divs as a third year";
       }
     } else if (termsInAttendance > 6) { // fourth year, beyond
       return `FALSE: Too many terms in attendance (${termsInAttendance} terms)`;
     }
   } else { // transfer admit
-    if (termsInAttendance === 6) { // new transfer
+    if (termsInAttendance < 7) { // new transfer
       if (numCompleted + numEnrolled === 7) {
         return true;
       } else if (numCompleted + numEnrolled === 6) {
+        Logger.log(`${sid}: DS CONDITIONAL: Summer Course Required to complete LD req`);
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "CONDITIONAL: Summer Course Required to complete LD req";
       } else {
+        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 6 lower divs as a new transfer`)
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 6 lower divs as a new transfer";
       }
     } else if (termsInAttendance === 7) { // continuing transfer
       if (numCompleted + numEnrolled === 7) {
         return true;
       } else {
+        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 7 lower divs as a continuing transfer`)
+        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 7 lower divs as a continuing transfer";
       }
     } else if (termsInAttendance > 7) { // applying with 4+ semesters at UC Berkeley
@@ -1361,6 +1381,10 @@ function studentPlanFlags(dataMap, currSem, reqListLongId) {
     const idInfo = dataMap[sid].identifying_info;
     const courseInfo = dataMap[sid].course_info;
     const reqMap = getReqListLong(reqListLongId);
+
+    if (dataMap[sid].unable_to_verify === "Not able to verify anything") {
+      return;
+    }
 
     dataMap[sid].egt_flags = egtFlags(idInfo, courseInfo, currSem);
     dataMap[sid].major_flags = majorFlags(idInfo, courseInfo, reqMap, currSem);
