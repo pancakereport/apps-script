@@ -711,41 +711,44 @@ function egtFlags(idInfo, courseInfo, currSem) {
 function countReqCompleted(courseInfo, reqs) {
   const notLetterGrade = ["PL", "P", "NP", "NA", "ENROLLED BUT NO GRADE", "I"];
   let total = 0;
-  const courses = [];
+  // const courses = [];
+  colName.startsWith(req + " ")
 
   Object.keys(courseInfo).forEach(colName => {
-    if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
+    const isExactMatch = reqs.some(req => colName.startsWith(req + " "));
+    if (colName.includes("course") && isExactMatch) {
       const baseReqName = colName.replace(" course", "");
       const gradeVal = courseInfo[baseReqName + " grade"];
-      Logger.log(baseReqName + " " + gradeVal);
+      // Logger.log(baseReqName + " " + gradeVal);
       
       if (!notLetterGrade.includes(gradeVal)) {
         total += 1
-        courses.push(baseReqName);
+        // courses.push(baseReqName);
       }
     }
   });
-  courses.length > 0 && Logger.log(`Requirements Completed: ${courses}`)
+  // courses.length > 0 && Logger.log(`Requirements Completed: ${courses}`)
   return total;
 }
 
 // count num enrolled of courses in reqs
 function countReqEnrolled(courseInfo, reqs, currSem) {
   let total = 0;
-  const courses = [];
+  // const courses = [];
 
   Object.keys(courseInfo).forEach(colName => {
-    if (colName.includes("course") && reqs.some(req => colName.startsWith(req))) {
+    const isExactMatch = reqs.some(req => colName.startsWith(req + " "));
+    if (colName.includes("course") && isExactMatch) {
       const baseReqName = colName.replace(" course", "");
       const semVal = courseInfo[baseReqName + " sem"];
       
       if (Number(semVal) === Number(currSem)) {
         total += 1
-        courses.push(baseReqName);
+        // courses.push(baseReqName);
       }
     }
   });
-  courses.length > 0 && Logger.log(`Requirements Enrolled: ${courses}`)
+  // courses.length > 0 && Logger.log(`Requirements Enrolled: ${courses}`)
   return total;
 }
 
@@ -867,8 +870,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled >= 3) {
         return true;
       } else {
-        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 3 lower divs as a first year`);
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
+        // Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 3 lower divs as a first year`);
+        // Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 3 lower divs as a first year";
       }
     } else if (termsInAttendance < 5) { // second year
@@ -876,8 +879,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled >= 5) {
         return true;
       } else {
-        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 5 lower divs as a second year`);
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
+        // Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 5 lower divs as a second year`);
+        // Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 5 lower divs as a second year";
       }
     } else if (termsInAttendance < 7) { // third year
@@ -885,8 +888,8 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled == 7) {
         return true;
       } else {
-        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 7 lower divs as a third year`);
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
+        // Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 7 lower divs as a third year`);
+        // Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 7 lower divs as a third year";
       }
     } else if (termsInAttendance > 6) { // fourth year, beyond
@@ -897,20 +900,20 @@ function meetsDSAdmitReq(idInfo, courseInfo, currSem) {
       if (numCompleted + numEnrolled === 7) {
         return true;
       } else if (numCompleted + numEnrolled === 6) {
-        Logger.log(`${sid}: DS CONDITIONAL: Summer Course Required to complete LD req`);
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
+        // Logger.log(`${sid}: DS CONDITIONAL: Summer Course Required to complete LD req`);
+        // Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "CONDITIONAL: Summer Course Required to complete LD req";
       } else {
-        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 6 lower divs as a new transfer`)
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
+        // Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 6 lower divs as a new transfer`)
+        // Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 6 lower divs as a new transfer";
       }
     } else if (termsInAttendance === 7) { // continuing transfer
       if (numCompleted + numEnrolled === 7) {
         return true;
       } else {
-        Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 7 lower divs as a continuing transfer`)
-        Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
+        // Logger.log(`${sid}: DS FALSE: Has not completed or enrolled in 7 lower divs as a continuing transfer`)
+        // Logger.log(`${sid}: numCompleted is ${numCompleted}, numEnrolled is ${numEnrolled}`);
         return "FALSE: Has not completed or enrolled in 7 lower divs as a continuing transfer";
       }
     } else if (termsInAttendance > 7) { // applying with 4+ semesters at UC Berkeley
@@ -1181,6 +1184,8 @@ function meetsStAdmitReq(idInfo, courseInfo, currSem) {
       // LD 1, LD 2 completed
       const lower_div = ["LD #1", "LD #2"];
       const numReqCompleted = countReqCompleted(courseInfo, lower_div);
+      Logger.log(`numReqCompleted: ${numReqCompleted}`)
+      Logger.log(`lower div length: ${lower_div.length}`)
       if (numReqCompleted != lower_div.length) {
         return "FALSE: Has not completed LD 1 or LD 2 as a transfer";
       } 
