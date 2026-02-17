@@ -2,7 +2,7 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Actions')
-    .addItem('Test Work So Far', 'fullFunction')
+    .addItem('Run Script', 'fullFunction')
     .addToUi();
 }
 
@@ -13,7 +13,7 @@ function fullFunction() {
   cleanCourses(dataMap);
   verifyInfo(dataMap, currSem, false); 
   studentPlanFlags(dataMap, currSem, reqListLongId);
-  writeToSheet(dataMap, "Intermediate Processed Data");
+  writeToSheet(dataMap, "Processed Data");
 }
 
 
@@ -59,7 +59,6 @@ function getInput(verbose=false) {
   rows.forEach(row => {
     const sid = String(row[sidIndex]);
     if (!sid) return; 
-    if (!randomSids.has(sid)) return;
     dataMap[sid] = {
       identifying_info: {},
       course_info: {}
@@ -1418,4 +1417,3 @@ function studentPlanFlags(dataMap, currSem, reqListLongId) {
     dataMap[sid].egt_flags = egtFlags(idInfo, courseInfo, currSem);
     dataMap[sid].major_flags = majorFlags(idInfo, courseInfo, reqMap, currSem);
   });
-}
