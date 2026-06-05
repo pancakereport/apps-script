@@ -159,6 +159,7 @@ function createCourseFilterView(spreadsheetId, sheetId, courseId, prefColIndex, 
   const idToSup = {
     "DATA 89": "Data 89: Mathematical and Graphical Foundations of Probability",
     "DATA C4AC": "Data C4AC: Data and Justice",
+    "DATA C6": "DATA 6. Introduction to Computational Thinking with Data Science and Society",
     "DATA C8": "Data C8: Foundations of Data Science",
     "DATA 36": "Data 36: Data Scholars Seminar (Foundations Workshop)",
     "DATA C88C": "Data C88C: Computational Structures in Data Science",
