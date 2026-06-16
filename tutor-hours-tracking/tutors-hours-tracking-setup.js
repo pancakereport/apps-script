@@ -208,17 +208,11 @@ function copyHoursSheet(baseSheetID, targetFolderID, course, semester, name, ema
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet object where the rules will be applied.
  * @param {number} row The 1-indexed row number containing the hours data.
  * @param {number} maxHours The maximum numeric value allowed before triggering the red highlight rule.
- * @param {string} course The name of the course. Determines the width of the range to apply formatting to.
+ * @param {number} numWeeks The total number of weeks detected from the base sheet. 
  * @return {void}
  */
-function addHighlightingToHoursRow(sheet, row, maxHours, course) {
-  var range;
-  if (course === 'DATA C104') {
-      range = sheet.getRange(row, 2, 1, 19); // columns B to T on the given row
-  } else {
-    range = sheet.getRange(row, 2, 1, 18); // columns B to S on the given row
-  }
-
+function addHighlightingToHoursRow(sheet, row, maxHours, numWeeks) {
+  const range = sheet.getRange(row, 2, 1, numWeeks);
   const rules = sheet.getConditionalFormatRules();
 
   // yellow for zero hours
@@ -254,6 +248,7 @@ function addHighlightingToHoursRow(sheet, row, maxHours, course) {
  * with formulas that reference the data in their shadow sheet.
  * 8. Applies conditional formatting to the tutor's row on the "Main" sheet using `addHighlightingToHoursRow`.
  *
+ * @param {string} baseSheetID The ID of the base Google Sheet used as a template for individual tutor hours sheets.
  * @param {string} targetFolderID The ID of the Google Drive folder where the Admin Sheet and individual hours sheets reside.
  * @param {string} course The course code (e.g., 'DATA C104'). Used for naming and determining the number of weeks/columns.
  * @param {string} semester The current semester string (e.g., 'Fall 2025'). Used for sheet naming.
@@ -262,9 +257,36 @@ function addHighlightingToHoursRow(sheet, row, maxHours, course) {
  * @param {number} tutors[].maxHours The max hours threshold for conditional formatting.
  * @return {void}
  */
-function setUpShadowSheetsAndIndex(targetFolderID, course, semester, tutors) {
+function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester, tutors) {
   const targetFolder = DriveApp.getFolderById(targetFolderID);
   const adminSheetName = `[${course} ${semester}] Tutor Hours Overview Admin Sheet`;
+
+  // dynamically determine the number of weeks/columns from the base sheet
+  let numWeeks = 0;
+  try {
+    const baseSpreadsheet = SpreadsheetApp.openById(baseSheetID);
+    const baseSheet = baseSpreadsheet.getSheets()[0]; // Assumes the first sheet contains the schedule
+    
+    // fetch a reasonable upper limit for weeks instead of the whole sheet's width.
+    // (30 is definitely more than the number of weeks we would have, and keeps the getValues call efficient)
+    const MAX_POSSIBLE_WEEKS = 30; 
+    const row2Values = baseSheet.getRange(2, 2, 1, MAX_POSSIBLE_WEEKS).getValues()[0];
+
+    // find the index of the first cell that DOES NOT start with "week"
+    const firstNonWeekIndex = row2Values.findIndex(val => 
+      !String(val).trim().toLowerCase().startsWith("week")
+    );
+
+    // if a non-week cell was found, that index equals our number of weeks.
+    // if all fetched cells were weeks, then the count is the max size (30)
+    const numWeeks = firstNonWeekIndex !== -1 ? firstNonWeekIndex : MAX_POSSIBLE_WEEKS;
+
+    Logger.log(`Detected ${numWeeks} weeks from the base sheet template.`);
+
+  } catch (e) {
+    Logger.log(`ERROR reading base sheet: ${e.message}. Defaulting to 18 weeks.`);
+    numWeeks = 18; // safe fallback
+  }
 
   // check if the admin sheet already exists
   const matchingFiles = targetFolder.getFilesByName(adminSheetName);
@@ -284,16 +306,11 @@ function setUpShadowSheetsAndIndex(targetFolderID, course, semester, tutors) {
     const mainSheet = adminSpreadsheet.getActiveSheet();
     mainSheet.setName("Main");
     const indexSheet = adminSpreadsheet.insertSheet("Index");
-    // set headers for "Main" and "Index" sheets
+
+    // dynamically set headers based on base sheet weeks (numWeeks)
     const headers = ["Name"];
-    if (course === 'DATA C104') {
-      for (let i = 1; i <= 19; i++) {
-        headers.push("Week " + i);
-      }
-    } else {
-      for (let i = 1; i <= 18; i++) {
-        headers.push("Week " + i);
-      }
+    for (let i = 1; i <= numWeeks; i++) {
+      headers.push("Week " + i);
     }
     mainSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     indexSheet.getRange("A1").setValue("Name");
@@ -383,15 +400,15 @@ function setUpShadowSheetsAndIndex(targetFolderID, course, semester, tutors) {
     const row = mainSheet.getLastRow() + 1;
     mainSheet.getRange(row, 1).setValue(name);
 
-    // add IMPORTRANGE formulas for weeks 1 to 19 from the shadow sheet
-      for (let week = 1; week <= 19; week++) {
-        const col = week + 1;
-        const shadowColLetter = String.fromCharCode(65 + week); // 66 (B) to 73 (I)
-        const formula = `='${name}'!${shadowColLetter}4`;
-        mainSheet.getRange(row, col).setFormula(formula);
-      }
+    // dynamically set formulas for the detected number of weeks
+    for (let week = 1; week <= numWeeks; week++) {
+      const col = week + 1;
+      const shadowColLetter = getColumnLetter(col); // Replaced hardcoded String.fromCharCode implementation
+      const formula = `='${name}'!${shadowColLetter}4`;
+      mainSheet.getRange(row, col).setFormula(formula);
+    }
 
-    addHighlightingToHoursRow(mainSheet, row, maxHours, course)
+    addHighlightingToHoursRow(mainSheet, row, maxHours, numWeeks)
     Logger.log(`Added ${name} to Main sheet at row ${row}`);
   }
 }
@@ -431,5 +448,5 @@ for (let i = 0; i < courses.length; i++) {
     copyHoursSheet(baseSheetID, targetFolderID, course, semester, tutor.name, tutor.email);
   });
 
-  setUpShadowSheetsAndIndex(targetFolderID, course, semester, tutors, courseShareEmails);
+  setUpShadowSheetsAndIndex(baseSheetID, targetFolderID, course, semester, tutors, courseShareEmails);
 }
