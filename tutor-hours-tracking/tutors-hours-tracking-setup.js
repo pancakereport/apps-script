@@ -279,7 +279,7 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
 
     // if a non-week cell was found, that index equals our number of weeks.
     // if all fetched cells were weeks, then the count is the max size (30)
-    const numWeeks = firstNonWeekIndex !== -1 ? firstNonWeekIndex : MAX_POSSIBLE_WEEKS;
+    numWeeks = firstNonWeekIndex !== -1 ? firstNonWeekIndex : MAX_POSSIBLE_WEEKS;
 
     Logger.log(`Detected ${numWeeks} weeks from the base sheet template.`);
 
@@ -400,10 +400,13 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
     const row = mainSheet.getLastRow() + 1;
     mainSheet.getRange(row, 1).setValue(name);
 
+
     // dynamically set formulas for the detected number of weeks
     for (let week = 1; week <= numWeeks; week++) {
       const col = week + 1;
-      const shadowColLetter = getColumnLetter(col); // Replaced hardcoded String.fromCharCode implementation
+      // the following may be a little slower than doing math but hopefully not a big deal here
+      // slow because .getRange() and .getA1Notation() repeatedly make a call to Google's spreadsheet servers
+      const shadowColLetter = mainSheet.getRange(1, col).getA1Notation().replace(/\d+/, "");
       const formula = `='${name}'!${shadowColLetter}4`;
       mainSheet.getRange(row, col).setFormula(formula);
     }
