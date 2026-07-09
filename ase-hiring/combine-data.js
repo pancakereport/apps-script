@@ -356,8 +356,10 @@ function generateAdminSheet() {
     return;
   }
 
-  const adminEmailIndex = linksHeaders.indexOf("Email");
+  const adminEmailIndex = combinedHeaders.indexOf("Email");
   const supEmailIndex = supHeaders.indexOf("Email Address");
+  Logger.log("supEmailIndex: " + supEmailIndex);
+  Logger.log("adminEmailIndex: " + adminEmailIndex);
     if (adminEmailIndex === -1 || supEmailIndex === -1) {
     Logger.log("Could not find email columns. Aborting.");
     return;
@@ -473,6 +475,7 @@ function generateAdminSheet() {
         const emailMatch = supEmailMap.get(adminEmailKey);
         
         if (emailMatch) {
+          Logger.log(adminEmailKey + " matched on email not SID");
             supRecord = emailMatch.record;
             // delete the typo ID from supMap so it won't create a duplicate row later
             supMap.delete(emailMatch.sidKey); 
