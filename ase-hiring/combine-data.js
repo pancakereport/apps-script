@@ -356,6 +356,14 @@ function generateAdminSheet() {
     return;
   }
 
+  const adminEmailIndex = linksHeaders.indexOf("Email");
+  const supEmailIndex = supHeaders.indexOf("Email Address");
+    if (adminEmailIndex === -1 || supEmailIndex === -1) {
+    Logger.log("Could not find email columns. Aborting.");
+    return;
+  }
+
+
   // supplemental column definition
   const duplicateCols = ["First Name", "Last Name", "Student ID Number", "Email Address", "Academic Career", "Expected Graduation Term"];
   const supplementalColumnsToFill = ["First Name", "Last Name", "Email Address", "Academic Career", "Expected Graduation Term", "Student ID Number", "Expected Graduation Term", "Course Preference"];
@@ -396,6 +404,7 @@ function generateAdminSheet() {
 
   // supplemental data - keep track of both unique values not in ALR and all values
   const supMap = new Map();
+  const supEmailMap = new Map();
   for (let i = 1; i < supData.length; i++) {
       const supRow = supData[i];
       const supKey = String(supRow[supSidIndex]).trim().toLowerCase(); 
@@ -414,6 +423,14 @@ function generateAdminSheet() {
               unique: uniqueSupData,
               fill: fillInData
           });
+
+          const supEmailKey = supEmailIndex !== -1 ? String(supRow[supEmailIndex]).trim().toLowerCase() : "";
+          if (supEmailKey) {
+              supEmailMap.set(supEmailKey, {
+                  sidKey: supKey, // save the ID so we can mark it as processed later if there is a typo
+                  record: supMap.get(supKey)
+              });
+          }
       }
   }
 
@@ -449,7 +466,18 @@ function generateAdminSheet() {
         Object.keys(enrollmentGrades).forEach(course => allEnrollmentCourses.add(course));
     }
     
-    const supRecord = supMap.get(adminKey);
+    let supRecord = supMap.get(adminKey);
+    // if ID doesn't match, try matching by email instead
+    if (!supRecord && adminEmailIndex !== -1) {
+        const adminEmailKey = String(row[adminEmailIndex]).trim().toLowerCase();
+        const emailMatch = supEmailMap.get(adminEmailKey);
+        
+        if (emailMatch) {
+            supRecord = emailMatch.record;
+            // delete the typo ID from supMap so it won't create a duplicate row later
+            supMap.delete(emailMatch.sidKey); 
+        }
+    }
     const supData = supRecord ? supRecord.unique : emptySupplementalRow;
     
     adminBaseDataRecords.push({
