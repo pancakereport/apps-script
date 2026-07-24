@@ -79,3 +79,44 @@ function getApprovedCourses() {
 
   return approvedCourses;
 }
+
+/**
+ * Retrieves and filters form response rows from the "Form Responses 1" sheet.
+ *
+ * Filters the sheet data based on two main criteria:
+ * 1. Submission date must be on or after May 26, 2026.
+ * 2. "Type of Request" must NOT contain the word "drop" (case-insensitive).
+ *
+ * Assumes row[0] contains a parseable date/timestamp and row 1 contains headers.
+ *
+ * @returns {Array<Array<*>>} A 2D array of filtered data rows excluding the header row.
+ */
+function getRowsToProcess() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const inputSheet = ss.getSheetByName("Form Responses 1"); 
+  const data = inputSheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  // Set the start date (Year, Month Index [0-11], Day)
+  const cutoffDate = new Date(2026, 4, 26);
+  // Normalize to the very start of that day (00:00:00)
+  cutoffDate.setHours(0, 0, 0, 0);
+
+  const typeIndex = headers.indexOf("Type of Request");
+
+  // filter for days including and after first day
+  const filteredRows = rows.filter(row => {
+    // filter for days including and after cutoffDate
+    const rowTimestamp = new Date(row[0]);
+    const isAfterCutoff = rowTimestamp >= cutoffDate;
+
+    // filter for students dropping the minor
+    const requestType = String(row[typeIndex] || "").toLowerCase();
+    const isNotDrop = !requestType.includes("drop");
+
+    return isAfterCutoff && isNotDrop;
+  });
+  
+  return filteredRows;
+}
