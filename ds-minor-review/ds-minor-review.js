@@ -50,7 +50,7 @@ function getApprovedCourses() {
 
   // initialize the object to hold course Sets grouped by category
   const approvedCourses = {
-    //"Foundations": new Set(["DATA C8", "STAT 20"]),
+    "Foundations": new Set(),
     "Program Structures": new Set(),
     "Probability": new Set(),
     "Gateway": new Set(),
@@ -63,10 +63,10 @@ function getApprovedCourses() {
     const reqValue = String(row[reqIndex]).toLowerCase();
     const course = formatCourse(row);
     // grouping logic based on Requirement column content
-    // if (reqValue.includes("minor foundations")) {
-    //     approvedCourses["Foundations"].add(course);
-    // } else 
-    if (reqValue.includes("minor program structures")) {
+    if (reqValue.includes("minor foundations")) {
+      approvedCourses["Foundations"].add(course);
+      // foundations not added to "All" set because it is treated separately during evaluation of applicant
+    } else if (reqValue.includes("minor program structures")) {
       approvedCourses["Program Structures"].add(course);
       approvedCourses["All"].add(course);
     } else if (reqValue.includes("minor probability")) {
@@ -290,8 +290,9 @@ function verifyGrade(reported, apiGrade) {
  *
  * @requires fetchEnrollmentData - Helper to fetch official student record from API.
  * @requires normalizeCourseName - Helper to clean and format course strings.
- * @requires getGradeForTerm - Helper to pull a grade for a specific term/course combination.
+ * @requires getRecordForTerm - Helper to pull a grade for a specific term/course combination.
  * @requires verifyGrade - Helper to compare reported vs. official API grades.
+ * @requires parseTermToId - Helper that translates plain language to term ids used by API.
  */
 function processRows(rows, approvedCourses) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -321,9 +322,10 @@ function processRows(rows, approvedCourses) {
     // foundations course processing
     const reportedD8Grade = String(row[d8gradeIndex] || "").trim().toUpperCase();
     const d8TermText = d8termIndex !== -1 ? row[d8termIndex] : "";
+    const d8TermId = parseTermToId(d8TermText);
 
     // Candidate course codes for Data 8 / Stat 20 cross-listings
-    const foundationCourses = ["DATA C8", "STAT 20"];
+    const foundationCourses = approvedCourses['Foundations'];
     let apiD8Grade = null;
     let apiD8Term = null;
     let d8MatchedCourse = "";
@@ -346,9 +348,11 @@ function processRows(rows, approvedCourses) {
     const rawC1 = row[c1Index];
     const reportedC1Grade = String(row[c1GradeIndex] || "").trim().toUpperCase();
     const c1TermText = c1TermIndex !== -1 ? row[c1TermIndex] : "";
+    const c1TermId = parseTermToId(c1TermText);
     const rawC2 = row[c2Index];
     const reportedC2Grade = String(row[c2GradeIndex] || "").trim().toUpperCase();
     const c2TermText = c2TermIndex !== -1 ? row[c2TermIndex] : "";
+    const c2TermId = parseTermToId(c2TermIndex);
 
     // normalize course names
     const c1Normalized = rawC1 ? normalizeCourseName(rawC1) : "";
@@ -358,7 +362,7 @@ function processRows(rows, approvedCourses) {
     const c1Approved = allApprovedSet.has(c1Normalized);
     const c2Approved = allApprovedSet.has(c2Normalized);
 
-    // lookup API grade for matching term or most recent attempt using normalized course name
+    // lookup API grade for matching term or most recent record
     const apiC1record = getRecordForTerm(enrollment, c1Normalized, c1TermText);
     const apiC2record = getRecordForTerm(enrollment, c2Normalized, c2TermText);
 
@@ -371,39 +375,48 @@ function processRows(rows, approvedCourses) {
     const c1GradeMatches = verifyGrade(reportedC1Grade, apiC1Grade);
     const c2GradeMatches = verifyGrade(reportedC2Grade, apiC2Grade);
 
+    const passingGrades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-'];
+    const d8PassingGrade = apiD8Grade in passingGrades ? true : false;
+    const c1PassingGrade = apiC1Grade in passingGrades ? true : false;
+    const c2PassingGrade = apiC2Grade in passingGrades ? true : false;
+
     // record results for this ID
     resultsByStudent[sid] = {
       sid: sid,
       foundations: {
-        reportedTerm: d8TermText,
+        reportedTerm: d8TermId,
         reportedGrade: reportedD8Grade,
         apiGrade: apiD8Grade,
         apiTerm: apiD8Term,
         apiCourse: d8MatchedCourse, // records whether "DATA C8" or "STAT 20" was found
-        gradeMatches: d8GradeMatches
+        gradeMatches: d8GradeMatches,
+        passingGrade: d8PassingGrade
       },
       course1: {
         raw: rawC1,
         normalized: c1Normalized,
-        reportedTerm: c1TermText,
+        reportedTerm: c1TermId,
         reportedGrade: reportedC1Grade,
         apiGrade: apiC1Grade,
         apiTerm: apiC1Term,
         isApproved: c1Approved,
-        gradeMatches: c1GradeMatches
+        gradeMatches: c1GradeMatches,
+        passingGrade: c1PassingGrade
       },
       course2: {
         raw: rawC2,
         normalized: c2Normalized,
-        reportedTerm: c2TermText,
+        reportedTerm: c2TermId,
         reportedGrade: reportedC2Grade,
         apiGrade: apiC2Grade,
         apiTerm: apiC2Term,
         isApproved: c2Approved,
-        gradeMatches: c2GradeMatches
+        gradeMatches: c2GradeMatches,
+        passingGrade: c2PassingGrade
       },
       allApproved: c1Approved && c2Approved,
-      allGradesVerified: c1GradeMatches && c2GradeMatches
+      allGradesVerified: c1GradeMatches && c2GradeMatches && d8GradeMatches,
+      allPassing: d8PassingGrade && c1PassingGrade && c2PassingGrade
     };
   }
   return resultsByStudent
