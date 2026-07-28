@@ -202,9 +202,12 @@ function getRowsToProcess() {
 }
 
 /**
- * Finds the grade in enrollment records matching both course name and reported term.
+ * Finds the enrollment record matching course name and reported term,
+ * falling back to the most recent record.
+ *
+ * @returns {Object|null} Enrollment record object containing grade and term information.
  */
-function getGradeForTerm(enrollmentMap, courseName, termText) {
+function getRecordForTerm(enrollmentMap, courseName, termText) {
   if (!enrollmentMap || !enrollmentMap[courseName]) return null;
   
   const attempts = enrollmentMap[courseName];
@@ -212,11 +215,11 @@ function getGradeForTerm(enrollmentMap, courseName, termText) {
 
   if (targetTermId) {
     const match = attempts.find(attempt => attempt.termId === targetTermId);
-    if (match) return match.grade;
+    if (match) return match;
   }
 
-  // default to most recent attempt
-  return attempts.sort((a, b) => b.termId - a.termId)[0]?.grade || null;
+  // default to most recent record
+  return [...attempts].sort((a, b) => b.termId - a.termId)[0] || null;
 }
 
 /**
@@ -272,7 +275,24 @@ function verifyGrade(reported, apiGrade) {
   return cleanReported === cleanApi;
 }
 
-
+/**
+ * Processes student form responses to verify course selections and reported grades 
+ * against official enrollment records and approved course lists.
+ *
+ * Reads header indexes directly from the active Google Sheet ("Form Responses 1")
+ * and queries enrollment data per student ID.
+ *
+ * @param {Array<Array<*>>} rows - 2D array of form response rows (excluding header row).
+ * @param {Object} approvedCourses - Lookup object containing approved course sets.
+ *
+ * @returns {Object.<string, Object>} Map of Student ID to verification results for 
+ *   foundations, course1, course2, overall approval status, and grade verification.
+ *
+ * @requires fetchEnrollmentData - Helper to fetch official student record from API.
+ * @requires normalizeCourseName - Helper to clean and format course strings.
+ * @requires getGradeForTerm - Helper to pull a grade for a specific term/course combination.
+ * @requires verifyGrade - Helper to compare reported vs. official API grades.
+ */
 function processRows(rows, approvedCourses) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const inputSheet = ss.getSheetByName("Form Responses 1"); 
@@ -303,15 +323,17 @@ function processRows(rows, approvedCourses) {
     const d8TermText = d8termIndex !== -1 ? row[d8termIndex] : "";
 
     // Candidate course codes for Data 8 / Stat 20 cross-listings
-    const d8Candidates = ["DATA C8", "STAT 20"];
+    const foundationCourses = ["DATA C8", "STAT 20"];
     let apiD8Grade = null;
+    let apiD8Term = null;
     let d8MatchedCourse = "";
 
     if (enrollment) {
-      for (const candidate of d8Candidates) {
-        const grade = getGradeForTerm(enrollment, candidate, d8TermText);
-        if (grade !== null) {
-          apiD8Grade = grade;
+      for (const candidate of foundationCourses) {
+        const attempt = getRecordForTerm(enrollment, candidate, d8TermText);
+        if (attempt) {
+          apiD8Grade = attempt.grade || null;
+          apiD8Term = attempt.term || attempt.termId || null; // captures term name or ID
           d8MatchedCourse = candidate;
           break; 
         }
@@ -333,12 +355,18 @@ function processRows(rows, approvedCourses) {
     const c2Normalized = rawC2 ? normalizeCourseName(rawC2) : "";
 
     // verify courses are on the approved list 
-    const c1Valid = allApprovedSet.has(c1Normalized);
-    const c2Valid = allApprovedSet.has(c2Normalized);
+    const c1Approved = allApprovedSet.has(c1Normalized);
+    const c2Approved = allApprovedSet.has(c2Normalized);
 
     // lookup API grade for matching term or most recent attempt using normalized course name
-    const apiC1Grade = getGradeForTerm(enrollment, c1Normalized, c1TermText);
-    const apiC2Grade = getGradeForTerm(enrollment, c2Normalized, c2TermText);
+    const apiC1record = getRecordForTerm(enrollment, c1Normalized, c1TermText);
+    const apiC2record = getRecordForTerm(enrollment, c2Normalized, c2TermText);
+
+    const apiC1Grade = apiC1record?.grade || null;
+    const apiC1Term = apiC1record?.term || apiC1record?.termId || null;
+
+    const apiC2Grade = apiC2record?.grade || null;
+    const apiC2Term = apiC2record?.term || apiC2record?.termId || null;
 
     const c1GradeMatches = verifyGrade(reportedC1Grade, apiC1Grade);
     const c2GradeMatches = verifyGrade(reportedC2Grade, apiC2Grade);
@@ -350,7 +378,8 @@ function processRows(rows, approvedCourses) {
         reportedTerm: d8TermText,
         reportedGrade: reportedD8Grade,
         apiGrade: apiD8Grade,
-        apiCourse: d8MatchedCourse, // Records whether "DATA C8", "STAT 20", etc. was found
+        apiTerm: apiD8Term,
+        apiCourse: d8MatchedCourse, // records whether "DATA C8" or "STAT 20" was found
         gradeMatches: d8GradeMatches
       },
       course1: {
@@ -359,7 +388,8 @@ function processRows(rows, approvedCourses) {
         reportedTerm: c1TermText,
         reportedGrade: reportedC1Grade,
         apiGrade: apiC1Grade,
-        isValid: c1Valid,
+        apiTerm: apiC1Term,
+        isApproved: c1Approved,
         gradeMatches: c1GradeMatches
       },
       course2: {
@@ -368,10 +398,11 @@ function processRows(rows, approvedCourses) {
         reportedTerm: c2TermText,
         reportedGrade: reportedC2Grade,
         apiGrade: apiC2Grade,
-        isValid: c2Valid,
+        apiTerm: apiC2Term,
+        isApproved: c2Approved,
         gradeMatches: c2GradeMatches
       },
-      allApproved: c1Valid && c2Valid,
+      allApproved: c1Approved && c2Approved,
       allGradesVerified: c1GradeMatches && c2GradeMatches
     };
   }
@@ -523,4 +554,10 @@ function fetchStudentData(studentId, verbose = false) {
     Logger.log(`Student API Exception for ${studentId}: ${error.toString()}`);
     return null;
   }
+}
+
+function testProcess() {
+  const approvedCourses = getApprovedCourses();
+  const rows = getRowsToProcess();
+  processRows(rows, approvedCourses);
 }
