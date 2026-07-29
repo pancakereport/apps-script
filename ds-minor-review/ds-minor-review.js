@@ -352,7 +352,7 @@ function processRows(rows, approvedCourses) {
     const rawC2 = row[c2Index];
     const reportedC2Grade = String(row[c2GradeIndex] || "").trim().toUpperCase();
     const c2TermText = c2TermIndex !== -1 ? row[c2TermIndex] : "";
-    const c2TermId = parseTermToId(c2TermIndex);
+    const c2TermId = parseTermToId(c2TermText);
 
     // normalize course names
     const c1Normalized = rawC1 ? normalizeCourseName(rawC1) : "";
@@ -376,9 +376,14 @@ function processRows(rows, approvedCourses) {
     const c2GradeMatches = verifyGrade(reportedC2Grade, apiC2Grade);
 
     const passingGrades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-'];
-    const d8PassingGrade = apiD8Grade in passingGrades ? true : false;
-    const c1PassingGrade = apiC1Grade in passingGrades ? true : false;
-    const c2PassingGrade = apiC2Grade in passingGrades ? true : false;
+    const d8PassingGrade = passingGrades.includes(apiD8Grade) ? true : false;
+    const c1PassingGrade = passingGrades.includes(apiC1Grade) ? true : false;
+    const c2PassingGrade = passingGrades.includes(apiC2Grade) ? true : false;
+
+    const allApproved = c1Approved && c2Approved;
+    const allGradesVerified = c1GradeMatches && c2GradeMatches && d8GradeMatches;
+    const allPassing = d8PassingGrade && c1PassingGrade && c2PassingGrade;
+    const allVerified = allApproved && allGradesVerified && allPassing;
 
     // record results for this ID
     resultsByStudent[sid] = {
@@ -390,7 +395,8 @@ function processRows(rows, approvedCourses) {
         apiTerm: apiD8Term,
         apiCourse: d8MatchedCourse, // records whether "DATA C8" or "STAT 20" was found
         gradeMatches: d8GradeMatches,
-        passingGrade: d8PassingGrade
+        passingGrade: d8PassingGrade,
+        verified: d8GradeMatches && d8PassingGrade
       },
       course1: {
         raw: rawC1,
@@ -401,7 +407,8 @@ function processRows(rows, approvedCourses) {
         apiTerm: apiC1Term,
         isApproved: c1Approved,
         gradeMatches: c1GradeMatches,
-        passingGrade: c1PassingGrade
+        passingGrade: c1PassingGrade,
+        verified: c1Approved && c1GradeMatches && c1PassingGrade
       },
       course2: {
         raw: rawC2,
@@ -412,11 +419,13 @@ function processRows(rows, approvedCourses) {
         apiTerm: apiC2Term,
         isApproved: c2Approved,
         gradeMatches: c2GradeMatches,
-        passingGrade: c2PassingGrade
+        passingGrade: c2PassingGrade,
+        verified: c2Approved && c2GradeMatches && c2PassingGrade
       },
-      allApproved: c1Approved && c2Approved,
-      allGradesVerified: c1GradeMatches && c2GradeMatches && d8GradeMatches,
-      allPassing: d8PassingGrade && c1PassingGrade && c2PassingGrade
+      allApproved: allApproved,
+      allGradesVerified: allGradesVerified,
+      allPassing: allPassing,
+      allVerified: allVerified
     };
   }
   return resultsByStudent
