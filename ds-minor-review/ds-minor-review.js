@@ -109,6 +109,18 @@ function getApprovedCourses() {
  * 
  * normalizeCourseName("ind eng 162"); 
  * // Returns: "INDENG 162"
+ * 
+ * normalizeCourseName("Elective - CMPBIO C146");
+ * // Returns: "COMPBIO C146"
+ * 
+ * normalizeCourseName("PBHLTH142");
+ * // Returns: "PBHLTH 142"
+ * 
+ * normalizeCourseName("MUSIC158A");
+ * // Returns: "MUSIC 158A"
+ * 
+ * normalizeCourseName("Data C100");
+ * // Returns: "Data C100"
  */
 function normalizeCourseName(name) {
   if (name == null) return "";
@@ -118,17 +130,18 @@ function normalizeCourseName(name) {
   clean = clean.replace(/^(DATA|CS|COMPSCI)\s?\/\s?(STAT|DATA)\s?/, "DATA ");
   // common department shorthand
   const mapping = {
-    "^CS(?=\\b|\\d)": "COMPSCI",
-    "^EE(?=\\b|\\d)": "EECS",
-    "^SOCIOLOGY(?=\\b|\\d)": "SOCIOL",
-    "^STATISTICS(?=\\b|\\d)": "STAT",
-    "^STATS(?=\\b|\\d)": "STAT",
-    "^ECO(?=\\b|\\d)": "ECON",
-    "^BIO(?=\\b|\\d)": "BIOLOGY",
-    "^MATHEMATICS(?=\\b|\\d)": "MATH",
-    "^MCB(?=\\b|\\d)": "MCELLBI",
-    "^CIV(?=\\b|\\d)": "CIVENG",
-    "^PHIL(?=\\b|\\d)": "PHILOS",
+    "\\bCS(?=\\b|\\d)": "COMPSCI",
+    "\\bEE(?=\\b|\\d)": "ELENG",
+    "\\bSOCIOLOGY(?=\\b|\\d)": "SOCIOL",
+    "\\bSTATISTICS(?=\\b|\\d)": "STAT",
+    "\\bSTATS(?=\\b|\\d)": "STAT",
+    "\\bECO(?=\\b|\\d)": "ECON",
+    "\\bBIO(?=\\b|\\d)": "BIOLOGY",
+    "\\bMATHEMATICS(?=\\b|\\d)": "MATH",
+    "\\bMCB(?=\\b|\\d)": "MCELLBI",
+    "\\bCIV(?=\\b|\\d)": "CIVENG",
+    "\\bPHIL(?=\\b|\\d)": "PHILOS",
+    // "\\bCMPBIO(?=\\b|\\d)": "COMPBIO"
   };
   for (let pattern in mapping) {
     let re = new RegExp(pattern, "i");
@@ -138,20 +151,18 @@ function normalizeCourseName(name) {
     }
   }
 
-  // collapse spaces in multi-word departments (e.g., "IND ENG" -> "INDENG")
-  // stop before hitting a digit OR a standalone [CNW] + digit
-  clean = clean.replace(/^([A-Z\s&]+?)(?=\s*[CNW]?\s*\d)/, function(match) {
-    return match.replace(/\s+/g, "");
-  });
+  // Only collapse multi-word department fragments if both words have 2+ letters.
+  // This prevents merging standalone 1-letter course prefixes (e.g., 'C' in 'DATA C100').
+  clean = clean.replace(/\b([A-Z]{2,})\s+([A-Z]{2,})(?=\s*(?:[A-Z]\d|\d))/gi, "$1$2");
 
-  // Group 2: The "Course Number String" (everything until the next space)
-  const parts = clean.match(/^([A-Z]+)\s*([A-Z]?\d\S*)/);
-  // const parts = clean.match(/^([A-Z]+)\s*[CNW]?\s*(\d\S*)/);
-  
-  if (parts) {
-    let dept = parts[1];
-    let num = parts[2];
-    // trim trailing punctuation and words while keeping the alphanumeric course num intact
+  // Extract department (2+ letters) and course number (optional 1-letter prefix + digits + optional suffix)
+  const courseMatch = clean.match(/\b([A-Z]{2,})\s*([A-Z]?\d[A-Z0-9]*)/i);
+
+  if (courseMatch) {
+    let dept = courseMatch[1];
+    let num = courseMatch[2];
+
+    // Strip trailing punctuation or non-alphanumeric text
     num = num.split(/[^A-Z0-9]/)[0];
 
     return dept + " " + num;
@@ -259,8 +270,39 @@ function parseTermToId(term) {
   return Number("2" + yearShort + semesterDigit);
 }
 
+
+/**
+ * Converts a Berkeley SIS numeric term ID back into a short term string (e.g., "sp26").
+ *
+ * @param {number|string} id - The numeric SIS Term ID (e.g., 2262 or "2262").
+ * @returns {string|null} The formatted short term string (e.g., "sp26"), or null if invalid.
+ */
+function parseIdToTerm(id) {
+  if (!id) return null;
+  const s = String(id).trim();
+  // Berkeley SIS term IDs are 4 digits starting with '2' (for 2000s)
+  if (!/^2\d{3}$/.test(s)) return null;
+
+  const yearShort = s.slice(1, 3);
+  const semesterDigit = s.slice(3);
+
+  let prefix;
+  if (semesterDigit === "2") {
+    prefix = "sp";
+  } else if (semesterDigit === "5") {
+    prefix = "su";
+  } else if (semesterDigit === "8") {
+    prefix = "fa";
+  } else {
+    return null; // Invalid semester code
+  }
+
+  return prefix + yearShort;
+}
+
 /**
  * Verifies if user reported grade matches API grade.
+ * Returns true if the user reports IP and SIS reports a grade.
  */
 function verifyGrade(reported, apiGrade) {
   if (!apiGrade) return false;
@@ -268,7 +310,11 @@ function verifyGrade(reported, apiGrade) {
   const cleanReported = reported.trim().toUpperCase();
   const cleanApi = String(apiGrade).trim().toUpperCase();
 
-  if ((cleanReported === "IP" || cleanReported === "IN PROGRESS") && cleanApi.includes("IN PROGRESS")) {
+  if ((cleanReported === "IP") && cleanApi.includes("IN PROGRESS")) {
+    return true;
+  }
+
+  if (cleanReported === "IP" && cleanApi !== "") {
     return true;
   }
 
@@ -377,6 +423,8 @@ function processRows(rows, approvedCourses) {
 
     const passingGrades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-'];
     const d8PassingGrade = passingGrades.includes(apiD8Grade) ? true : false;
+    // course 1 and 2 grades can be in progress
+    passingGrades.push("IN PROGRESS");
     const c1PassingGrade = passingGrades.includes(apiC1Grade) ? true : false;
     const c2PassingGrade = passingGrades.includes(apiC2Grade) ? true : false;
 
@@ -504,6 +552,86 @@ function fetchEnrollmentData(studentId, verbose = false) {
   }
 }
 
+// append results to an output sheet 
+function writeOutput(results) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Verification Outputs") || ss.insertSheet("Verification Outputs");
+  // FUTURE CHANGE: REMOVE THE FOLLOWING LINE FOR APPENDING. 
+  // RIGHT NOW CLEARING IS GOOD FOR DEBUGGING
+  sheet.clear();
+
+  // write headers if empty sheet
+  const isEmpty = sheet.getLastRow() === 0;
+  if (isEmpty) {
+    sheet.appendRow([
+      "Student ID", 
+      "Overall Verification", 
+      "Foundations Verified", 
+      "Foundations More Info", 
+      "Course 1 Verified", 
+      "Course 1 More Info", 
+      "Course 2 Verified", 
+      "Course 2 More Info"
+    ]);
+  }
+
+  const outputRows = [];
+
+  for (const sid in results) {
+    const data = results[sid];
+
+    const foundationsInfo = buildFoundationsSummary(data.foundations);
+    const c1Info = buildCourseSummary(data.course1);
+    const c2Info = buildCourseSummary(data.course2);
+
+    outputRows.push([
+      data.sid,
+      data.allVerified ? "VERIFIED" : "FLAGGED",
+      data.foundations.verified ? "YES" : "NO",
+      foundationsInfo,
+      data.course1.verified ? "YES" : "NO",
+      c1Info,
+      data.course2.verified ? "YES" : "NO",
+      c2Info
+    ]);
+  }
+
+  if (outputRows.length > 0) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, outputRows.length, outputRows[0].length).setValues(outputRows);
+  }
+
+}
+
+/**
+ * Helper to produce human-readable diagnostic notes for Foundations course verification.
+ */
+function buildFoundationsSummary(f) {
+  const notes = [];
+
+  if (f.apiCourse) {
+    const term = parseIdToTerm(f.apiTerm);
+    notes.push(`${f.apiCourse} taken ${term}`);
+  } else {
+    notes.push("No foundations course taken according to SIS");
+  }
+  if (!f.gradeMatches) notes.push(`Grade Mismatch (Reported: ${f.reportedGrade || 'None'}, SIS: ${f.apiGrade || 'None'})`);
+  if (!f.passingGrade) notes.push(`SIS shows nonpassing grade: ${f.apiGrade || 'N/A'}`);
+  return notes.join(" | ");
+}
+
+/**
+ * Helper to produce human-readable diagnostic notes for Course #1 & Course #2 verification.
+ */
+function buildCourseSummary(c) {
+  const notes = [];
+  if (!c.isApproved) notes.push("Unapproved Course");
+  if (!c.gradeMatches) notes.push(`Grade Mismatch (Reported: ${c.reportedGrade || 'None'}, SIS: ${c.apiGrade || 'None'})`);
+  if (!c.passingGrade) notes.push(`SIS shows nonpassing grade: ${c.apiGrade}`);
+
+  return notes.length > 0 ? [`Course: ${c.normalized || 'Unknown'}`, ...notes].join(" | ") : null;
+}
+
 
 /**
  * Fetches undergraduate academic status (Expected Graduation Term and declared majors)
@@ -554,7 +682,7 @@ function fetchStudentData(studentId, verbose = false) {
           status.studentCareer?.academicCareer?.code === "UGRD"
         );
         if (undergradCareer) {
-          // record major, college for each major plan and egt (egt should be the same if double major??)
+          // record major and egt
           undergradCareer.studentPlans.forEach(plan => {
             if (plan.academicPlan?.type?.code !== "MAJ") return;
             studentData.egt = plan.expectedGraduationTerm?.id || null;
@@ -562,7 +690,7 @@ function fetchStudentData(studentId, verbose = false) {
           });
         }
       } else {
-        Logger.log(`Could not find undergraduate enrollment for ${studentId}. No GPA or EGT or termsInAttendance will be recorded.`)
+        Logger.log(`Could not find undergraduate enrollment for ${studentId}. No GPA or EGT will be recorded.`)
       }
       if (verbose) {
         Logger.log(`Student API response for ${studentId}: ` + JSON.stringify(studentData, null, 2));
@@ -578,8 +706,22 @@ function fetchStudentData(studentId, verbose = false) {
   }
 }
 
+function testNorm() {
+  const a = "DATA C100";
+  const b = "MUSIC158A";
+  Logger.log(`${a} -> ${normalizeCourseName(a)}`);
+  Logger.log(`${b} -> ${normalizeCourseName(b)}`);
+}
+
+function testSID() {
+  const sid = "";
+  const enrollment = fetchEnrollmentData(sid);
+  Logger.log(JSON.stringify(enrollment));
+}
+
 function testProcess() {
   const approvedCourses = getApprovedCourses();
   const rows = getRowsToProcess();
-  processRows(rows, approvedCourses);
+  const results = processRows(rows, approvedCourses);
+  writeOutput(results);
 }
