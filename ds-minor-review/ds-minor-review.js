@@ -217,13 +217,12 @@ function processRows(rows, approvedCourses) {
     // foundations course processing
     const reportedD8Grade = String(row[d8gradeIndex] || "").trim().toUpperCase();
     const d8TermText = d8termIndex !== -1 ? row[d8termIndex] : "";
-    const d8TermId = parseTermToId(d8TermText);
 
     // Candidate course codes for Data 8 / Stat 20 cross-listings
     const foundationCourses = approvedCourses['Foundations'];
     let apiD8Grade = null;
     let apiD8Term = null;
-    let d8MatchedCourse = "";
+    let d8MatchedCourse = "No foundations course found by SIS";
 
     if (enrollment) {
       for (const candidate of foundationCourses) {
@@ -289,11 +288,11 @@ function processRows(rows, approvedCourses) {
       first: first,
       last: last,
       egtReported: egtReported,
-      egtSIS: studentData.egt,
+      egtSIS: studentData.egt || "",
       majorReported: majorReported,
-      majorSIS: studentData.majors,
+      majorSIS: studentData.majors || "", 
       foundations: {
-        reportedTerm: d8TermId,
+        reportedTerm: d8TermText,
         reportedGrade: reportedD8Grade,
         apiGrade: apiD8Grade,
         apiTerm: apiD8Term,
@@ -335,6 +334,28 @@ function processRows(rows, approvedCourses) {
   return resultsByStudent
 }
 
+/**
+ * Writes student verification summary results to a Google Sheet.
+ * 
+ * Clears and populates the "Verification Outputs" sheet (creating it if missing)
+ * with a standardized header and rows detailing each student's verification status
+ * across Foundations, Course 1, and Course 2.
+ *
+ * @param {Object.<string, StudentVerificationData>} results - An object mapping student IDs 
+ *   to their respective verification data objects.
+ * 
+ * @typedef {Object} CourseData
+ * @property {boolean} verified - Indicates if the course requirement was fulfilled.
+ * 
+ * @typedef {Object} StudentVerificationData
+ * @property {string|number} sid - The unique student identification number.
+ * @property {boolean} allVerified - Overall verification status for the student.
+ * @property {CourseData} foundations - Verification details for foundation requirements.
+ * @property {CourseData} course1 - Verification details for Course 1.
+ * @property {CourseData} course2 - Verification details for Course 2.
+ * 
+ * @returns {void}
+ */
 function writeOutput(results) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("Verification Outputs") || ss.insertSheet("Verification Outputs");
@@ -342,12 +363,30 @@ function writeOutput(results) {
   sheet.clear();
   sheet.appendRow([
     "Student ID", 
+    "Email",
+    "First Name",
+    "Last Name",
+    "Reported EGT",
+    "SIS EGT",
+    "Reported Major(s)",
+    "SIS Major(s)",
     "Overall Verification", 
     "Foundations Verified", 
+    "Foundations Course",
+    "Foundations Reported Semester",
+    "Foundations SIS Semester",
+    // "Foundations Reported Grade",
+    // "Foundations SIS Grade",
     "Foundations More Info", 
     "Course 1 Verified", 
+    "Course 1 Reported",
+    "Course 1 Normalized",
+    "Course 1 Reported Semester",
+    "Course 1 SIS Semester",
     "Course 1 More Info", 
     "Course 2 Verified", 
+    "Course 2 Reported",
+    "Course 2 Normalized",
     "Course 2 More Info"
   ]);
   
@@ -360,14 +399,33 @@ function writeOutput(results) {
     const c1Info = buildCourseSummary(data.course1);
     const c2Info = buildCourseSummary(data.course2);
 
+    const egtSIS = parseIdToTerm(data.egtSIS);
+    const foundationSem = parseIdToTerm(data.foundations.apiTerm);
+
     outputRows.push([
       data.sid,
-      data.allVerified ? "VERIFIED" : "FLAGGED",
+      data.email,
+      data.first,
+      data.last,
+      data.egtReported,
+      egtSIS,
+      data.majorReported,
+      data.majorSIS,
+      data.allVerified ? "VERIFIED" : "FALSE",
       data.foundations.verified ? "YES" : "NO",
+      data.foundations.apiCourse,
+      data.foundations.reportedTerm,
+      foundationSem,
+      // data.foundations.reportedGrade,
+      // data.foundations.apiGrade,
       foundationsInfo,
       data.course1.verified ? "YES" : "NO",
+      data.course1.raw,
+      data.course1.normalized,
       c1Info,
       data.course2.verified ? "YES" : "NO",
+      data.course2.raw,
+      data.course2.normalized,
       c2Info
     ]);
   }
@@ -528,7 +586,6 @@ function fetchStudentData(studentId, verbose = false) {
   }
 }
 
-
 // #########################################
 // ########### HELPER FUNCTIONS ############
 // #########################################
@@ -675,12 +732,11 @@ function parseTermToId(term) {
   return Number("2" + yearShort + semesterDigit);
 }
 
-
 /**
- * Converts a Berkeley SIS numeric term ID back into a short term string (e.g., "sp26").
+ * Converts a Berkeley SIS numeric term ID back into a term string (e.g., "2026 Spring").
  *
  * @param {number|string} id - The numeric SIS Term ID (e.g., 2262 or "2262").
- * @returns {string|null} The formatted short term string (e.g., "sp26"), or null if invalid.
+ * @returns {string|null} The formatted term string (e.g., "2026 Spring"), or null if invalid.
  */
 function parseIdToTerm(id) {
   if (!id) return null;
@@ -691,23 +747,35 @@ function parseIdToTerm(id) {
   const yearShort = s.slice(1, 3);
   const semesterDigit = s.slice(3);
 
-  let prefix;
+  let suffix;
   if (semesterDigit === "2") {
-    prefix = "sp";
+    suffix = "Spring";
   } else if (semesterDigit === "5") {
-    prefix = "su";
+    suffix = "Summer";
   } else if (semesterDigit === "8") {
-    prefix = "fa";
+    suffix = "Fall";
   } else {
     return null; // Invalid semester code
   }
 
-  return prefix + yearShort;
+  return "20" + yearShort + " " + suffix;
 }
 
 /**
- * Verifies if user reported grade matches API grade.
- * Returns true if the user reports IP and SIS reports a grade.
+ * Verifies if a user-reported course grade matches the API grade from SIS.
+ * 
+ * Handles special cases for "In Progress" (IP) status as well as direct grade matching.
+ * Grade comparisons are case-insensitive and trimmed of whitespace.
+ *
+ * Verification rules:
+ * 1. Returns `false` if `apiGrade` is null, undefined, or empty (falsy).
+ * 2. Returns `true` if reported grade is "IP" and API grade contains "IN PROGRESS" or is non-empty.
+ * 3. Returns `true` if sanitized reported grade exactly matches sanitized API grade.
+ *
+ * @param {string} reported - The grade reported by the user (e.g., "A", "IP", "P").
+ * @param {string|number|null|undefined} apiGrade - The official grade returned from SIS.
+ * 
+ * @returns {boolean} `true` if the reported grade is verified against the API grade; otherwise `false`.
  */
 function verifyGrade(reported, apiGrade) {
   if (!apiGrade) return false;
@@ -727,24 +795,45 @@ function verifyGrade(reported, apiGrade) {
 }
 
 /**
- * Helper to produce human-readable diagnostic notes for Foundations course verification.
+ * Builds a formatted summary string of diagnostic notes for Foundations course verification.
+ * 
+ * Combines details about the course, term, and verification flags (such as grade mismatches
+ * or non-passing grades) into a single pipe-separated (` | `) string.
+ *
+ * @param {FoundationsVerificationData} f - The Foundations verification result object.
+ * 
+ * @typedef {Object} FoundationsVerificationData
+ * @property {string|number} [reportedGrade] - Grade entered by the user.
+ * @property {string|number} [apiGrade] - Official grade recorded in the SIS.
+ * @property {boolean} gradeMatches - Whether the reported grade aligns with the API grade.
+ * @property {boolean} passingGrade - Whether the recorded API grade meets passing criteria.
+ *
+ * @returns {string} Pipe-separated diagnostic notes (e.g., "MATH 101 taken Fall 2023 | Grade Mismatch (Reported: B, SIS: C)").
  */
 function buildFoundationsSummary(f) {
   const notes = [];
-
-  if (f.apiCourse) {
-    const term = parseIdToTerm(f.apiTerm);
-    notes.push(`${f.apiCourse} taken ${term}`);
-  } else {
-    notes.push("No foundations course taken according to SIS");
-  }
   if (!f.gradeMatches) notes.push(`Grade Mismatch (Reported: ${f.reportedGrade || 'None'}, SIS: ${f.apiGrade || 'None'})`);
   if (!f.passingGrade) notes.push(`SIS shows nonpassing grade: ${f.apiGrade || 'N/A'}`);
   return notes.join(" | ");
 }
 
 /**
- * Helper to produce human-readable diagnostic notes for Course #1 & Course #2 verification.
+ * Builds a formatted summary string of diagnostic notes for Course 1 or Course 2 verification.
+ * 
+ * Combines the course identifier with diagnostic flags (such as unapproved courses, grade
+ * mismatches, or non-passing grades) into a pipe-separated (` | `) string.
+ *
+ * @param {CourseVerificationData} c - The course verification result object.
+ * 
+ * @typedef {Object} CourseVerificationData
+ * @property {boolean} isApproved - Whether the course satisfies approval requirements.
+ * @property {boolean} gradeMatches - Whether the reported grade aligns with the API grade.
+ * @property {boolean} passingGrade - Whether the recorded API grade meets passing criteria.
+ * @property {string|number} [reportedGrade] - Grade entered by the user.
+ * @property {string|number} [apiGrade] - Official grade recorded in the SIS.
+ *
+ * @returns {string|null} Pipe-separated diagnostic notes prefixed by the course name
+ *   (e.g., "Course: CS 101 | Grade Mismatch (Reported: B, SIS: C)"), or `null` if there are no flags.
  */
 function buildCourseSummary(c) {
   const notes = [];
@@ -752,5 +841,5 @@ function buildCourseSummary(c) {
   if (!c.gradeMatches) notes.push(`Grade Mismatch (Reported: ${c.reportedGrade || 'None'}, SIS: ${c.apiGrade || 'None'})`);
   if (!c.passingGrade) notes.push(`SIS shows nonpassing grade: ${c.apiGrade}`);
 
-  return notes.length > 0 ? [`Course: ${c.normalized || 'Unknown'}`, ...notes].join(" | ") : null;
+  return notes.join(" | ");
 }
