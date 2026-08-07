@@ -195,6 +195,7 @@ function processRows(rows, approvedCourses) {
   const c2Index = headers.indexOf("What is the second course that you have completed or have in progress toward the minor?");
   const c2TermIndex = headers.indexOf("In which term did you complete or will you complete Course #2? (e.g. Fall 2024)");
   const c2GradeIndex = headers.indexOf("If completed, what is your grade in Course #2? (if still in progress, list IP)");
+  const pathwayIndex = headers.indexOf("Which pathway are you using to fulfill the Gateway requirement?");
 
   const resultsByStudent = {};
   const allApprovedSet = approvedCourses['All'];
@@ -207,6 +208,7 @@ function processRows(rows, approvedCourses) {
     const last = String(row[lastIndex] || "").trim();
     const egtReported = String(row[egtIndex] || "").trim();
     const majorReported = String(row[majorIndex] || "").trim();
+    const pathway = String(row[pathwayIndex] || "").trim();
 
     if (!sid) continue; // skip rows missing a Student ID
 
@@ -242,11 +244,9 @@ function processRows(rows, approvedCourses) {
     const rawC1 = row[c1Index];
     const reportedC1Grade = String(row[c1GradeIndex] || "").trim().toUpperCase();
     const c1TermText = c1TermIndex !== -1 ? row[c1TermIndex] : "";
-    const c1TermId = parseTermToId(c1TermText);
     const rawC2 = row[c2Index];
     const reportedC2Grade = String(row[c2GradeIndex] || "").trim().toUpperCase();
     const c2TermText = c2TermIndex !== -1 ? row[c2TermIndex] : "";
-    const c2TermId = parseTermToId(c2TermText);
 
     // normalize course names
     const c1Normalized = rawC1 ? normalizeCourseName(rawC1) : "";
@@ -291,6 +291,7 @@ function processRows(rows, approvedCourses) {
       egtSIS: studentData.egt || "",
       majorReported: majorReported,
       majorSIS: studentData.majors || "", 
+      pathway: pathway || "",
       foundations: {
         reportedTerm: d8TermText,
         reportedGrade: reportedD8Grade,
@@ -304,7 +305,7 @@ function processRows(rows, approvedCourses) {
       course1: {
         raw: rawC1,
         normalized: c1Normalized,
-        reportedTerm: c1TermId,
+        reportedTerm: c1TermText,
         reportedGrade: reportedC1Grade,
         apiGrade: apiC1Grade,
         apiTerm: apiC1Term,
@@ -316,7 +317,7 @@ function processRows(rows, approvedCourses) {
       course2: {
         raw: rawC2,
         normalized: c2Normalized,
-        reportedTerm: c2TermId,
+        reportedTerm: c2TermText,
         reportedGrade: reportedC2Grade,
         apiGrade: apiC2Grade,
         apiTerm: apiC2Term,
@@ -375,8 +376,6 @@ function writeOutput(results) {
     "Foundations Course",
     "Foundations Reported Semester",
     "Foundations SIS Semester",
-    // "Foundations Reported Grade",
-    // "Foundations SIS Grade",
     "Foundations More Info", 
     "Course 1 Verified", 
     "Course 1 Reported",
@@ -387,7 +386,18 @@ function writeOutput(results) {
     "Course 2 Verified", 
     "Course 2 Reported",
     "Course 2 Normalized",
-    "Course 2 More Info"
+    "Course 2 Reported Semester",
+    "Course 2 SIS Semester",
+    "Course 2 More Info",
+    "Pathway",
+    // grades are listed at the end because if a mismatch is found, it is surfaced
+    // earlier in a "more info" column
+    "Foundations Reported Grade",
+    "Foundations SIS Grade",
+    "Course 1 Reported Grade",
+    "Course 1 SIS Grade",
+    "Course 2 Reported Grade",
+    "Course 2 SIS Grade"
   ]);
   
   const outputRows = [];
@@ -401,6 +411,8 @@ function writeOutput(results) {
 
     const egtSIS = parseIdToTerm(data.egtSIS);
     const foundationSem = parseIdToTerm(data.foundations.apiTerm);
+    const c1Sem = parseIdToTerm(data.course1.apiTerm);
+    const c2Sem = parseIdToTerm(data.course2.apiTerm);
 
     outputRows.push([
       data.sid,
@@ -416,17 +428,26 @@ function writeOutput(results) {
       data.foundations.apiCourse,
       data.foundations.reportedTerm,
       foundationSem,
-      // data.foundations.reportedGrade,
-      // data.foundations.apiGrade,
       foundationsInfo,
       data.course1.verified ? "YES" : "NO",
       data.course1.raw,
       data.course1.normalized,
+      data.course1.reportedTerm,
+      c1Sem,
       c1Info,
       data.course2.verified ? "YES" : "NO",
       data.course2.raw,
       data.course2.normalized,
-      c2Info
+      data.course2.reportedTerm,
+      c2Sem,
+      c2Info,
+      data.pathway,
+      data.foundations.reportedGrade,
+      data.foundations.apiGrade,
+      data.course1.reportedGrade,
+      data.course1.apiGrade,
+      data.course2.reportedGrade,
+      data.course2.apiGrade
     ]);
   }
 
@@ -733,10 +754,10 @@ function parseTermToId(term) {
 }
 
 /**
- * Converts a Berkeley SIS numeric term ID back into a term string (e.g., "2026 Spring").
+ * Converts a Berkeley SIS numeric term ID back into a term string (e.g., "Spring 2026").
  *
  * @param {number|string} id - The numeric SIS Term ID (e.g., 2262 or "2262").
- * @returns {string|null} The formatted term string (e.g., "2026 Spring"), or null if invalid.
+ * @returns {string|null} The formatted term string (e.g., "Spring 2026"), or null if invalid.
  */
 function parseIdToTerm(id) {
   if (!id) return null;
@@ -747,18 +768,18 @@ function parseIdToTerm(id) {
   const yearShort = s.slice(1, 3);
   const semesterDigit = s.slice(3);
 
-  let suffix;
+  let prefix;
   if (semesterDigit === "2") {
-    suffix = "Spring";
+    prefix = "Spring";
   } else if (semesterDigit === "5") {
-    suffix = "Summer";
+    prefix = "Summer";
   } else if (semesterDigit === "8") {
-    suffix = "Fall";
+    prefix = "Fall";
   } else {
     return null; // Invalid semester code
   }
 
-  return "20" + yearShort + " " + suffix;
+  return prefix + " " + "20" + yearShort;
 }
 
 /**
@@ -808,7 +829,7 @@ function verifyGrade(reported, apiGrade) {
  * @property {boolean} gradeMatches - Whether the reported grade aligns with the API grade.
  * @property {boolean} passingGrade - Whether the recorded API grade meets passing criteria.
  *
- * @returns {string} Pipe-separated diagnostic notes (e.g., "MATH 101 taken Fall 2023 | Grade Mismatch (Reported: B, SIS: C)").
+ * @returns {string} Pipe-separated diagnostic notes.
  */
 function buildFoundationsSummary(f) {
   const notes = [];
@@ -833,7 +854,7 @@ function buildFoundationsSummary(f) {
  * @property {string|number} [apiGrade] - Official grade recorded in the SIS.
  *
  * @returns {string|null} Pipe-separated diagnostic notes prefixed by the course name
- *   (e.g., "Course: CS 101 | Grade Mismatch (Reported: B, SIS: C)"), or `null` if there are no flags.
+ *   (e.g., "Grade Mismatch (Reported: B, SIS: C)"), or `null` if there are no flags.
  */
 function buildCourseSummary(c) {
   const notes = [];
