@@ -216,6 +216,9 @@ function processRows(rows, approvedCourses) {
     const studentData = fetchStudentData(sid);
     const enrollment = fetchEnrollmentData(sid);
 
+    // check if student has taken both STAT 20 and ENGIN 7
+    const s20e7 = Boolean(enrollment?.["STAT 20"] && enrollment?.["ENGIN 7"]);
+
     // foundations course processing
     const reportedD8Grade = String(row[d8gradeIndex] || "").trim().toUpperCase();
     const d8TermText = d8termIndex !== -1 ? row[d8termIndex] : "";
@@ -300,7 +303,8 @@ function processRows(rows, approvedCourses) {
         apiCourse: d8MatchedCourse, // records whether "DATA C8" or "STAT 20" was found
         gradeMatches: d8GradeMatches,
         passingGrade: d8PassingGrade,
-        verified: d8GradeMatches && d8PassingGrade
+        verified: d8GradeMatches && d8PassingGrade,
+        s20e7: s20e7
       },
       course1: {
         raw: rawC1,
@@ -754,10 +758,10 @@ function parseTermToId(term) {
 }
 
 /**
- * Converts a Berkeley SIS numeric term ID back into a term string (e.g., "Spring 2026").
+ * Converts a Berkeley SIS numeric term ID back into a term string (e.g., "2026 Spring").
  *
  * @param {number|string} id - The numeric SIS Term ID (e.g., 2262 or "2262").
- * @returns {string|null} The formatted term string (e.g., "Spring 2026"), or null if invalid.
+ * @returns {string|null} The formatted term string (e.g., "2026 Spring"), or null if invalid.
  */
 function parseIdToTerm(id) {
   if (!id) return null;
@@ -768,18 +772,18 @@ function parseIdToTerm(id) {
   const yearShort = s.slice(1, 3);
   const semesterDigit = s.slice(3);
 
-  let prefix;
+  let suffix;
   if (semesterDigit === "2") {
-    prefix = "Spring";
+    suffix = "Spring";
   } else if (semesterDigit === "5") {
-    prefix = "Summer";
+    suffix = "Summer";
   } else if (semesterDigit === "8") {
-    prefix = "Fall";
+    suffix = "Fall";
   } else {
     return null; // Invalid semester code
   }
 
-  return prefix + " " + "20" + yearShort;
+  return "20" + yearShort + " " + suffix;
 }
 
 /**
@@ -835,6 +839,7 @@ function buildFoundationsSummary(f) {
   const notes = [];
   if (!f.gradeMatches) notes.push(`Grade Mismatch (Reported: ${f.reportedGrade || 'None'}, SIS: ${f.apiGrade || 'None'})`);
   if (!f.passingGrade) notes.push(`SIS shows nonpassing grade: ${f.apiGrade || 'N/A'}`);
+  if (f.s20e7) notes.push("SIS shows both STAT 20 and ENGIN 7");
   return notes.join(" | ");
 }
 
