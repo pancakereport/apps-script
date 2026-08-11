@@ -1,3 +1,11 @@
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Actions')
+    .addItem('Process Grades', 'testProcess')
+    .addToUi();
+}
+
+
 // #########################################
 // ##### TEST FUNCTIONS TO RUN SCRIPTS #####
 // #########################################
@@ -47,7 +55,8 @@ function testGetCourseDepartment() {
 function testProcess() {
   const approvedCourses = getApprovedCourses();
   const courseDepartment = getCourseDepartment();
-  const rows = getRowsToProcess();
+  const date = getDate();
+  const rows = getRowsToProcess(date);
   const results = processRows(rows, approvedCourses, courseDepartment);
   writeOutput(results);
 }
@@ -225,35 +234,53 @@ function getCourseDepartment() {
 }
 
 /**
+ * Retrieves a date from cell A1 of the "Process From Given Date" sheet
+ * and normalizes it to the start of the day (00:00:00.000).
+ *
+ * @returns {Date} A JavaScript Date object set to 00:00:00 on the specified date.
+ * @throws {Error} If cell A1 does not contain a valid Date object.
+ */
+function getDate() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const inputSheet = ss.getSheetByName("Process From Given Date"); 
+  const rawDate = inputSheet.getRange("A1").getValue();
+
+  if (!(rawDate instanceof Date) || isNaN(rawDate.getTime())) {
+    throw new Error("Cell A1 does not contain a valid date.");
+  }
+
+  const cutoffDate = new Date(rawDate);
+  cutoffDate.setHours(0, 0, 0, 0);
+  
+  return cutoffDate;
+}
+
+/**
  * Retrieves and filters form response rows from the "Form Responses 1" sheet.
  *
  * Filters the sheet data based on two main criteria:
- * 1. Submission date must be on or after May 26, 2026.
+ * 1. Submission date must be on or after the provided cutoff date.
  * 2. "Type of Request" must NOT contain the word "drop" (case-insensitive).
  *
  * Assumes row[0] contains a parseable date/timestamp and row 1 contains headers.
  *
+ * @param {Date} date - The normalized cutoff date to filter submissions from.
  * @returns {Array<Array<*>>} A 2D array of filtered data rows excluding the header row.
  */
-function getRowsToProcess() {
+function getRowsToProcess(date) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const inputSheet = ss.getSheetByName("Form Responses 1"); 
   const data = inputSheet.getDataRange().getValues();
   const headers = data[0];
   const rows = data.slice(1);
 
-  // Set the start date (Year, Month Index [0-11], Day)
-  const cutoffDate = new Date(2026, 4, 26);
-  // Normalize to the very start of that day (00:00:00)
-  cutoffDate.setHours(0, 0, 0, 0);
-
   const typeIndex = headers.indexOf("Type of Request");
 
   // filter for days including and after first day
   const filteredRows = rows.filter(row => {
-    // filter for days including and after cutoffDate
+    // filter for days including and after the cutoff date
     const rowTimestamp = new Date(row[0]);
-    const isAfterCutoff = rowTimestamp >= cutoffDate;
+    const isAfterCutoff = rowTimestamp >= date;
 
     // filter for students dropping the minor
     const requestType = String(row[typeIndex] || "").toLowerCase();
