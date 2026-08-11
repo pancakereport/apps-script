@@ -46,8 +46,9 @@ function testGetCourseDepartment() {
 
 function testProcess() {
   const approvedCourses = getApprovedCourses();
+  const courseDepartment = getCourseDepartment();
   const rows = getRowsToProcess();
-  const results = processRows(rows, approvedCourses);
+  const results = processRows(rows, approvedCourses, courseDepartment);
   writeOutput(results);
 }
 
@@ -185,13 +186,13 @@ function getCourseDepartment() {
   const cNumberToDepts = {}; // Maps "C100" -> Set of departments ["Data Science", "Computer Science", ...]
 
   data.slice(1).forEach(row => {
-    const dept = String(row[deptIndex] || "").trim();
+    const d = String(row[deptIndex] || "").trim();
     const listing = String(row[listingIndex] || "").trim();
     const number = String(row[numIndex] || "").trim();
 
-    if (!dept || !listing || !number) return;
+    if (!d || !listing || !number) return;
 
-    dept = dept.replace(/([,\s-]+Undergrad(uate)?)$/i, "").trim();
+    const dept = d.replace(/([,\s-]+Undergrad(uate)?)$/i, "").trim();
 
     const courseKey = `${listing} ${number}`;
     rawCourseToDept[courseKey] = { dept: dept, number: number };
@@ -283,7 +284,7 @@ function getRowsToProcess() {
  * @requires verifyGrade - Helper to compare reported vs. official API grades.
  * @requires parseTermToId - Helper that translates plain language to term ids used by API.
  */
-function processRows(rows, approvedCourses) {
+function processRows(rows, approvedCourses, courseDepartment) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const inputSheet = ss.getSheetByName("Form Responses 1"); 
   const headers = inputSheet.getRange(1, 1, 1, inputSheet.getLastColumn()).getValues()[0];
@@ -391,6 +392,28 @@ function processRows(rows, approvedCourses) {
     const allPassing = d8PassingGrade && c1PassingGrade && c2PassingGrade;
     const allVerified = allApproved && allGradesVerified && allPassing;
 
+    // check if applicant lists multiple upper division courses from their home department 
+    const count = 0;
+    const [c1listing, rawC1num] = c1Normalized.split(" ");
+    const [c2listing, rawC2num] = c2Normalized.split(" ");
+    const c1num = parseInt(rawC1num.replace(/\D/g, ""), 10);
+    const c2num = parseInt(rawC2num.replace(/\D/g, ""), 10);
+    let isMajorCourse = false;
+    // check only if both courses from the same department and upper division
+    if (c1listing === c2listing && c1num > 99 && c2num > 99) {
+      // check if the course listing is the applicant's major
+      const d1 = courseDepartment[c1Normalized] || [];
+      const d2 = courseDepartment[c2Normalized] || [];
+
+      // Collect reported majors (filter out null/undefined)
+      const targetMajors = [majorReported, studentData?.majors].filter(Boolean);
+      // Check if d1 and d2 share an element that matches an applicant's major
+      isMajorCourse = d1.some(dpt => 
+        d2.includes(dpt) && targetMajors.includes(dpt)
+      );
+
+    }
+
     // record results for this ID
     resultsByStudent[sid] = {
       sid: sid,
@@ -402,6 +425,7 @@ function processRows(rows, approvedCourses) {
       majorReported: majorReported,
       majorSIS: studentData.majors || "", 
       pathway: pathway || "",
+      multDept: isMajorCourse,
       foundations: {
         reportedTerm: d8TermText,
         reportedGrade: reportedD8Grade,
@@ -501,6 +525,7 @@ function writeOutput(results) {
     "Course 2 SIS Semester",
     "Course 2 More Info",
     "Pathway",
+    "Multiple Courses from Home Department",
     // grades are listed at the end because if a mismatch is found, it is surfaced
     // earlier in a "more info" column
     "Foundations Reported Grade",
@@ -553,6 +578,7 @@ function writeOutput(results) {
       c2Sem,
       c2Info,
       data.pathway,
+      data.multDept,
       data.foundations.reportedGrade,
       data.foundations.apiGrade,
       data.course1.reportedGrade,
