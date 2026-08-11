@@ -15,6 +15,35 @@ function testSID() {
   Logger.log(JSON.stringify(enrollment));
 }
 
+function testGetCourseDepartment() {
+  const courseDept = getCourseDepartment();
+  const courseKeys = Object.keys(courseDept);
+  Logger.log(`Total courses mapped: ${courseKeys.length}`);
+
+  if (courseKeys.length === 0) {
+    Logger.log("WARNING: courseDept object is empty. Check sheet permissions or tab name.");
+    return;
+  }
+
+  // 1. Log cross-listed courses (where department array length > 1)
+  Logger.log("--- SAMPLE CROSS-LISTED COURSES ---");
+  let crossListedCount = 0;
+  
+  for (const courseKey in courseDept) {
+    const depts = courseDept[courseKey];
+    if (depts.length > 1) {
+      crossListedCount++;
+      // Log the first 5 cross-listed courses found as samples
+      if (crossListedCount <= 5) {
+        Logger.log(`${courseKey} -> [${depts.join(", ")}]`);
+      }
+    }
+  }
+  Logger.log(`Total cross-listed course keys found: ${crossListedCount}`);
+
+  Logger.log(JSON.stringify(courseDept, null, 2));
+}
+
 function testProcess() {
   const approvedCourses = getApprovedCourses();
   const rows = getRowsToProcess();
@@ -114,6 +143,84 @@ function getApprovedCourses() {
   });
 
   return approvedCourses;
+}
+
+/**
+ * Reads the "All Approved" sheet and returns a lookup object mapping
+ * each course string (e.g., "DATA C100") to an Array of ALL department 
+ * names offering it (including cross-listed partners).
+ *
+ * @returns {Object.<string, Array<string>>} Map of course name -> Array of Department Names.
+ *   e.g. { "DATA C100": ["Data Science", "Computer Science", "Statistics"] }
+ */
+function getCourseDepartment() {
+  // spreadsheet with approved courses for the DS Major/Minor
+  const file = SpreadsheetApp.openById("1OS7gdYGkc3_qjy4EkyNl9V3aZYCFV7rGP9PAOze7q4Y");
+  const sheet = file.getSheetByName("All Approved");
+
+  if (!sheet) {
+    Logger.log("Sheet tab 'All Approved' not found.");
+    return {};
+  }
+
+  const data = sheet.getDataRange().getValues();
+
+  if (data.length < 2) {
+    Logger.log("Sheet is empty or missing data rows.");
+    return null;
+  }
+
+  const headers = data[0];
+  const listingIndex = headers.indexOf("Course Listing");
+  const deptIndex = headers.indexOf("Course Department");
+  const numIndex = headers.indexOf("Course Number");
+
+  if (listingIndex === -1 || deptIndex === -1 || numIndex === -1) {
+    Logger.log("One or more required headers were not found.");
+    return {};
+  }
+
+  // Temporary storage to hold direct course -> dept pairs and group 'C' cross-listings
+  const rawCourseToDept = {};
+  const cNumberToDepts = {}; // Maps "C100" -> Set of departments ["Data Science", "Computer Science", ...]
+
+  data.slice(1).forEach(row => {
+    const dept = String(row[deptIndex] || "").trim();
+    const listing = String(row[listingIndex] || "").trim();
+    const number = String(row[numIndex] || "").trim();
+
+    if (!dept || !listing || !number) return;
+
+    dept = dept.replace(/([,\s-]+Undergrad(uate)?)$/i, "").trim();
+
+    const courseKey = `${listing} ${number}`;
+    rawCourseToDept[courseKey] = { dept: dept, number: number };
+
+    // Group departments by 'C' course number
+    if (/^C/i.test(number)) {
+      if (!cNumberToDepts[number]) {
+        cNumberToDepts[number] = new Set();
+      }
+      cNumberToDepts[number].add(dept);
+    }
+  });
+
+  // Build final lookup object where every course maps to an array of all associated departments
+  const courseToDept = {};
+
+  for (const courseKey in rawCourseToDept) {
+    const { dept, number } = rawCourseToDept[courseKey];
+
+    if (/^C/i.test(number) && cNumberToDepts[number]) {
+      // Cross-listed course: assign all departments sharing this 'C' number
+      courseToDept[courseKey] = Array.from(cNumberToDepts[number]);
+    } else {
+      // Single department course
+      courseToDept[courseKey] = [dept];
+    }
+  }
+
+  return courseToDept;
 }
 
 /**
