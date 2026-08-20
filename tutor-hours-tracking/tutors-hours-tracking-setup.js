@@ -270,22 +270,36 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
     // fetch a reasonable upper limit for weeks instead of the whole sheet's width.
     // (30 is definitely more than the number of weeks we would have, and keeps the getValues call efficient)
     const MAX_POSSIBLE_WEEKS = 30; 
-    const row2Values = baseSheet.getRange(2, 2, 1, MAX_POSSIBLE_WEEKS).getValues()[0];
+    
+    // Helper function to count consecutive "week" cells in a given row (starting at column B / col 2)
+    const countWeeksInRow = (rowIndex) => {
+      const values = baseSheet.getRange(rowIndex, 2, 1, MAX_POSSIBLE_WEEKS).getValues()[0];
+      const firstNonWeekIndex = values.findIndex(val => 
+        !String(val).trim().toLowerCase().startsWith("week")
+      );
+      return firstNonWeekIndex !== -1 ? firstNonWeekIndex : MAX_POSSIBLE_WEEKS;
+    };
 
-    // find the index of the first cell that DOES NOT start with "week"
-    const firstNonWeekIndex = row2Values.findIndex(val => 
-      !String(val).trim().toLowerCase().startsWith("week")
-    );
+    // Check Row 2 first
+    numWeeks = countWeeksInRow(2);
 
-    // if a non-week cell was found, that index equals our number of weeks.
-    // if all fetched cells were weeks, then the count is the max size (30)
-    numWeeks = firstNonWeekIndex !== -1 ? firstNonWeekIndex : MAX_POSSIBLE_WEEKS;
+    // If Row 2 had no "week" cells, check Row 3
+    if (numWeeks === 0) {
+      Logger.log(`No 'week' headers found in Row 2. Checking Row 3...`);
+      numWeeks = countWeeksInRow(3);
+    }
 
     Logger.log(`Detected ${numWeeks} weeks from the base sheet template.`);
 
   } catch (e) {
     Logger.log(`ERROR reading base sheet: ${e.message}. Defaulting to 18 weeks.`);
     numWeeks = 18; // safe fallback
+  }
+
+  // Fallback: If numWeeks is still 0 (e.g., if cell B2/B3 doesn't start with "week"), set to 18
+  if (numWeeks === 0) {
+    Logger.log(`No 'week' headers found in Row 2 or Row 3. Applying fallback default of 18 weeks.`);
+    numWeeks = 18;
   }
 
   // check if the admin sheet already exists
