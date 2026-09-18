@@ -419,26 +419,22 @@ function processRows(rows, approvedCourses, courseDepartment) {
     const allPassing = d8PassingGrade && c1PassingGrade && c2PassingGrade;
     const allVerified = allApproved && allGradesVerified && allPassing;
 
-    // check if applicant lists multiple upper division courses from their home department 
-    const count = 0;
-    const [c1listing, rawC1num] = c1Normalized.split(" ");
-    const [c2listing, rawC2num] = c2Normalized.split(" ");
-    const c1num = parseInt(rawC1num.replace(/\D/g, ""), 10);
-    const c2num = parseInt(rawC2num.replace(/\D/g, ""), 10);
+    // check only if both courses from the same department and upper division 
+    // including cross listed courses
     let isMajorCourse = false;
-    // check only if both courses from the same department and upper division
-    if (c1listing === c2listing && c1num > 99 && c2num > 99) {
-      // check if the course listing is the applicant's major
-      const d1 = courseDepartment[c1Normalized] || [];
-      const d2 = courseDepartment[c2Normalized] || [];
+    const d1 = courseDepartment[c1Normalized] || [];
+    const d2 = courseDepartment[c2Normalized] || [];
 
-      // Collect reported majors (filter out null/undefined)
-      const targetMajors = [majorReported, studentData?.majors].filter(Boolean);
-      // Check if d1 and d2 share an element that matches an applicant's major
-      isMajorCourse = d1.some(dpt => 
-        d2.includes(dpt) && targetMajors.includes(dpt)
-      );
+    const studentMajors = [majorReported, studentData?.majors]
+      .filter(Boolean)
+      .flatMap(m => Array.isArray(m) ? m : [m]);
 
+    // Helper function to check if a course's department list matches any of the student's majors
+    const matchesMajor = (deptList) => deptList.some(dept => studentMajors.includes(dept));
+
+    // Flag if BOTH courses are upper division (> 99) AND both belong to/cross-list with the home major
+    if (c1num > 99 && c2num > 99) {
+      isMajorCourse = matchesMajor(d1) && matchesMajor(d2);
     }
 
     // record results for this ID
