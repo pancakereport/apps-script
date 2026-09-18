@@ -499,6 +499,9 @@ function processRows(rows, approvedCourses, courseDepartment) {
  * Clears and populates the "Verification Outputs" sheet (creating it if missing)
  * with a standardized header and rows detailing each student's verification status
  * across Foundations, Course 1, and Course 2.
+ * 
+ * Additionally updates the "Status" column on the "Advisors Edit Here" sheet by matching 
+ * Student IDs.
  *
  * @param {Object.<string, StudentVerificationData>} results - An object mapping student IDs 
  *   to their respective verification data objects.
@@ -614,6 +617,43 @@ function writeOutput(results) {
   if (outputRows.length > 0) {
     const startRow = sheet.getLastRow() + 1;
     sheet.getRange(startRow, 1, outputRows.length, outputRows[0].length).setValues(outputRows);
+  }
+
+  // Update "Advisors Edit Here" sheet
+  const advisorSheet = ss.getSheetByName("Advisors Edit Here");
+  if (!advisorSheet) return;
+
+  const advisorData = advisorSheet.getDataRange().getValues();
+  if (advisorData.length < 2) return; // Exit if empty or header-only
+
+  const headers = advisorData[0];
+  const sidIndex = headers.indexOf("UC Berkeley Student ID Number:");
+  const statusIndex = headers.indexOf("Status");
+
+  // Exit safely if target columns don't exist on advisor sheet
+  if (sidIndex === -1 || statusIndex === -1) {
+    Logger.log("Could not find required columns on 'Advisors Edit Here' sheet.");
+    return;
+  }
+
+  // Prepare status updates in memory (keeping existing values where no match/update occurs)
+  const statusUpdates = [];
+  for (let i = 1; i < advisorData.length; i++) {
+    const sid = String(advisorData[i][sidIndex] || "").trim();
+    if (sid && results[sid]) {
+      const statusValue = results[sid].allVerified ? "VERIFIED" : "FALSE";
+      statusUpdates.push([statusValue]);
+    } else {
+      // Retain existing cell value if the student isn't in results
+      statusUpdates.push([advisorData[i][statusIndex]]);
+    }
+  }
+
+  // Batch write only to the "Status" column
+  if (statusUpdates.length > 0) {
+    advisorSheet
+      .getRange(2, statusIndex + 1, statusUpdates.length, 1)
+      .setValues(statusUpdates);
   }
 
 }
