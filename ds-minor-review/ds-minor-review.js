@@ -365,14 +365,42 @@ function processRows(rows, approvedCourses, courseDepartment) {
     let d8MatchedCourse = "No foundations course found by SIS";
 
     if (enrollment) {
-      for (const candidate of foundationCourses) {
-        const attempt = getRecordForTerm(enrollment, candidate, d8TermText);
-        if (attempt) {
-          apiD8Grade = attempt.grade || null;
-          apiD8Term = attempt.term || attempt.termId || null; // captures term name or ID
-          d8MatchedCourse = candidate;
-          break; 
+      const targetTermId = parseTermToId(d8TermText);
+      let bestAttempt = null;
+      let bestCourse = null;
+
+      // find a foundations course with an attempt in the reported term
+      if (targetTermId) {
+        const termMatches = [];
+        for (const candidate of foundationCourses) {
+          const match = (enrollment[candidate] || []).find(attempt => attempt.termId === targetTermId);
+          if (match) termMatches.push({ course: candidate, attempt: match });
         }
+
+        // if multiple courses were taken that term, prefer the one whose grade matches the reported grade
+        const chosen = termMatches.find(m => verifyGrade(reportedD8Grade, m.attempt.grade)) || termMatches[0];
+        if (chosen) {
+          bestAttempt = chosen.attempt;
+          bestCourse = chosen.course;
+        }
+      }
+
+      // if course not found for reported term, fallback to most recent attempt across all foundations courses
+      if (!bestAttempt) {
+        for (const candidate of foundationCourses) {
+          for (const attempt of enrollment[candidate] || []) {
+            if (!bestAttempt || attempt.termId > bestAttempt.termId) {
+              bestAttempt = attempt;
+              bestCourse = candidate;
+            }
+          }
+        }
+      }
+
+      if (bestAttempt) {
+        apiD8Grade = bestAttempt.grade || null;
+        apiD8Term = bestAttempt.term || bestAttempt.termId || null; // captures term name or ID
+        d8MatchedCourse = bestCourse;
       }
     }
 
@@ -421,6 +449,11 @@ function processRows(rows, approvedCourses, courseDepartment) {
 
     // check only if both courses from the same department and upper division 
     // including cross listed courses
+    const [c1listing, rawC1num] = c1Normalized.split(" ");
+    const [c2listing, rawC2num] = c2Normalized.split(" ");
+    const c1num = parseInt(rawC1num.replace(/\D/g, ""), 10);
+    const c2num = parseInt(rawC2num.replace(/\D/g, ""), 10);
+    
     let isMajorCourse = false;
     const d1 = courseDepartment[c1Normalized] || [];
     const d2 = courseDepartment[c2Normalized] || [];
@@ -934,7 +967,7 @@ function parseTermToId(term) {
   }
 
   // extract semester and year
-  const match = s.match(/^(sp|spring|su|summer|fa|fall)(\d{4})$/);
+  const match = s.match(/^(sp|spring|su|summer|fa|fall) ?(\d{2}|\d{4})$/);
   if (!match) return null;
 
   const prefix = match[1];
