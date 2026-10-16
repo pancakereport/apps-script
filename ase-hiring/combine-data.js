@@ -386,17 +386,15 @@ function generateAdminSheet() {
     return;
   }
 
-
   // supplemental column definition
-  const duplicateCols = ["First Name", "Last Name", "Student ID Number", "Email Address", "Academic Career", "Expected Graduation Term"];
-  const supplementalColumnsToFill = ["First Name", "Last Name", "Email Address", "Academic Career", "Expected Graduation Term", "Student ID Number", "Course Preference"];
+  const duplicateCols = ["First Name", "Last Name", "Student ID Number", "Email Address", "Academic Career"];
+  const supplementalColumnsToFill = ["First Name", "Last Name", "Email Address", "Academic Career", "Student ID Number", "Course Preference"];
 
   // map sup column names to ALR/admin column names where they differ
   const colMap = {
       "First Name": "First name", 
       "Last Name": "Last name", 
       "Student ID Number": "Student ID", 
-      "Expected Graduation Term": "Expected graduation", 
       "Academic Career": "Student group",
       "Email Address": "Email",
       "Course Preference": "Classes"
@@ -552,7 +550,6 @@ function generateAdminSheet() {
                  newLinksAlrRow[adminIndex] = dataToInsert;
             }
         }
-        
         unmatchedSupRecords.push({
             row: newLinksAlrRow,
             supData: supRecord.unique,
@@ -611,7 +608,6 @@ function generateAdminSheet() {
       finalHeaders.length);
   }
 }
-
 
 // ###################################
 // ## CREATE SHEETS FOR INSTRUCTORS ##
@@ -828,7 +824,6 @@ function generateInstructorSheets() {
         }
 
         // construct the new row by picking columns to keep
-        
         // get the kept fixed/link part of the row
         let newRow = fixedIndicesToKeep.map(index => rowToProcess[index]);
 
