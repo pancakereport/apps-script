@@ -7,7 +7,28 @@ function onOpen() {
     .addItem('2. Update Admin Sheet', 'generateAdminSheet')
     .addSeparator()
     .addItem('3. Update Instructor Sheets', 'generateInstructorSheets')
+    .addToUi()
+    .addItem('All: Update Links, Admin Sheet, and Instructor Sheets', 'checkAndUpdateSheetsMenu')
     .addToUi();
+}
+
+function checkAndUpdateSheetsMenu() {
+  Logger.log("Menu-Driven check started.");
+  try {
+    generateReviewLinks();
+    Logger.log("Review Links updated.");
+
+    Logger.log("Calling generateAdminSheet()...");
+    generateAdminSheet();
+    Logger.log("generateAdminSheet() complete.");
+
+    Logger.log("Calling generateInstructorSheets()...");
+    generateInstructorSheets();
+    Logger.log("generateInstructorSheets() complete.");
+
+  } catch (error) {
+    Logger.log(`A TIME-DRIVEN error occurred: ${error.toString()}`);
+  }
 }
 
 // hourly updates to admin sheet (if supplemental application or ALR
