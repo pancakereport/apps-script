@@ -389,7 +389,7 @@ function generateAdminSheet() {
 
   // supplemental column definition
   const duplicateCols = ["First Name", "Last Name", "Student ID Number", "Email Address", "Academic Career", "Expected Graduation Term"];
-  const supplementalColumnsToFill = ["First Name", "Last Name", "Email Address", "Academic Career", "Expected Graduation Term", "Student ID Number", "Expected Graduation Term", "Course Preference"];
+  const supplementalColumnsToFill = ["First Name", "Last Name", "Email Address", "Academic Career", "Expected Graduation Term", "Student ID Number", "Course Preference"];
 
   // map sup column names to ALR/admin column names where they differ
   const colMap = {
