@@ -90,8 +90,10 @@ function verifyMinimumUnits(verbose = false) {
     const first = student.first || units?.first || "";
     const last = student.last || units?.last || "";
     const email = student.email || units?.email || "";
+    // met the requirement last run but not now, so clear Notified to email them again
+    const notified = (prev.met === true && met === false) ? "" : (prev.notified || "");
     return [first, last, email, sid, info.egt || "", college,
-            enrolled, waitlisted, total, met, rcl, prev.notified || ""];
+            enrolled, waitlisted, total, met, rcl, notified];
   });
 
   writeOutput(rows, "Output");
@@ -201,8 +203,8 @@ function readMinimums(minimumsSheetName) {
     .map(row => ({ college: normalizeCollege(row[collegeIndex]), units: Number(row[unitsIndex]) }));
 }
 
-/** Read RCL exempt and Notified from a previous run so reruns keep them
- * Returns a map of {SID: {rcl: val, notified: val}}
+/** Read RCL exempt, Notified, and Unit requirement met? from a previous run so reruns keep them
+ * Returns a map of {SID: {rcl: val, notified: val, met: val}}
  * */
 function readPreviousOutput(outputSheetName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -215,11 +217,13 @@ function readPreviousOutput(outputSheetName) {
   const sidIndex = headers.indexOf("Student ID");
   const rclIndex = headers.indexOf("RCL exempt?");
   const notifiedIndex = headers.indexOf("Notified");
+  const metIndex = headers.indexOf("Unit requirement met?");
   if (sidIndex === -1) return previous;
   data.slice(1).forEach(row => {
     previous[String(row[sidIndex]).trim()] = {
       rcl: rclIndex === -1 ? "" : row[rclIndex],
-      notified: notifiedIndex === -1 ? "" : row[notifiedIndex]
+      notified: notifiedIndex === -1 ? "" : row[notifiedIndex],
+      met: metIndex === -1 ? "" : row[metIndex]
     };
   });
   return previous;

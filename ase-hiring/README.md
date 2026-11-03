@@ -103,6 +103,7 @@ Rows that qualify but have no email address are skipped. Their Student IDs are w
 
 **Reruns and resending:**
 - Rerunning "Verify Minimum Units" keeps the "Notified" times (and "RCL exempt?" values) by Student ID, so clicking the email button again only reaches students who haven't been emailed yet, such as students newly below the minimum.
+- If a student met the requirement on the last run but doesn't now, their "Notified" cell is cleared so they're emailed again.
 - To email someone again, clear their "Notified" cell.
 - Duplicate Student IDs share their "Notified" value after a rerun.
 
