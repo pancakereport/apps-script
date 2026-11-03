@@ -46,6 +46,8 @@ To keep track of what term this should be run for, there is a "Semester Input" s
 
 If the API 404s for a student, their unit counts should be -1
 
+For the emails, my daily quota is 1500. 
+
 ## `verify-minimum-units.js` Set up Instructions
 **Apps Script relies on the exact naming of sheets and columns. Please be careful with how things are named and set up.**
 
