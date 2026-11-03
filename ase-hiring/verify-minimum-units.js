@@ -86,10 +86,11 @@ function verifyMinimumUnits(verbose = false) {
         met = units.enrolled >= minimum;
       }
     }
-    // fall back to the API for name and email if not on the input sheet
-    const first = student.first || units?.first || "";
-    const last = student.last || units?.last || "";
-    const email = student.email || units?.email || "";
+    // name and email: input sheet, then the API, then what was on Output last
+    // run (so values typed into Output aren't lost when the API has nothing)
+    const first = student.first || units?.first || prev.first || "";
+    const last = student.last || units?.last || prev.last || "";
+    const email = student.email || units?.email || prev.email || "";
     // met the requirement last run but not now, so clear Notified to email them again
     const notified = (prev.met === true && met === false) ? "" : (prev.notified || "");
     return [first, last, email, sid, info.egt || "", college,
@@ -203,8 +204,8 @@ function readMinimums(minimumsSheetName) {
     .map(row => ({ college: normalizeCollege(row[collegeIndex]), units: Number(row[unitsIndex]) }));
 }
 
-/** Read RCL exempt, Notified, and Unit requirement met? from a previous run so reruns keep them
- * Returns a map of {SID: {rcl: val, notified: val, met: val}}
+/** Read RCL exempt, Notified, Unit requirement met?, and name/email from a previous run so reruns keep them
+ * Returns a map of {SID: {rcl: val, notified: val, met: val, first: val, last: val, email: val}}
  * */
 function readPreviousOutput(outputSheetName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -218,12 +219,19 @@ function readPreviousOutput(outputSheetName) {
   const rclIndex = headers.indexOf("RCL exempt?");
   const notifiedIndex = headers.indexOf("Notified");
   const metIndex = headers.indexOf("Unit requirement met?");
+  const firstIndex = headers.indexOf("First name");
+  const lastIndex = headers.indexOf("Last name");
+  const emailIndex = headers.indexOf("Email");
   if (sidIndex === -1) return previous;
+  const getText = (row, index) => index === -1 ? "" : String(row[index]).trim();
   data.slice(1).forEach(row => {
     previous[String(row[sidIndex]).trim()] = {
       rcl: rclIndex === -1 ? "" : row[rclIndex],
       notified: notifiedIndex === -1 ? "" : row[notifiedIndex],
-      met: metIndex === -1 ? "" : row[metIndex]
+      met: metIndex === -1 ? "" : row[metIndex],
+      first: getText(row, firstIndex),
+      last: getText(row, lastIndex),
+      email: getText(row, emailIndex)
     };
   });
   return previous;
