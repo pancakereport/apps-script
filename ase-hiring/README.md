@@ -46,8 +46,6 @@ To keep track of what term this should be run for, there is a "Semester Input" s
 
 If the API 404s for a student, their unit counts should be -1
 
-For the emails, my daily quota is 1500. 
-
 ## `verify-minimum-units.js` Set up Instructions
 **Apps Script relies on the exact naming of sheets and columns. Please be careful with how things are named and set up.**
 
@@ -62,7 +60,7 @@ For the emails, my daily quota is 1500.
 
     a. `1. Verify Minimum Units` (`verifyMinimumUnits`): Create (or overwrite) the "Output" sheet. Units are blank if the API returned an error, and -1 if no enrollment was found (404). "Unit requirement met?" is blank if the student's college isn't on "Minimum Units by College". "RCL exempt?" can be edited directly on "Output"; reruns keep the values you entered (as do the "Notified" timestamps).
 
-    b. `2. Email ASEs Not Meeting Requirement` (`emailUnmetRequirement`): After confirming, emails every student on "Output" where "Unit requirement met?" is FALSE, "RCL exempt?" is not TRUE, and "Notified" is empty, then records the send time in "Notified". To resend to a student, clear their "Notified" cell. Edit `EMAIL_SUBJECT` and `EMAIL_BODY` at the top of the script to change the message.
+    b. `2. Email ASEs Not Meeting Requirement` (`emailUnmetRequirement`): After confirming, emails every student on "Output" where "Unit requirement met?" is FALSE, "RCL exempt?" is not TRUE, and "Notified" is empty, then records the send time in "Notified". To resend to a student, clear their "Notified" cell. Edit `EMAIL_SUBJECT` and `EMAIL_BODY` at the top of the script to change the message. See [Email functionality](#email-functionality) for details.
 
 ### How Home College is pulled from the Student API
 The college has been read from the Student API (`academicStatuses[].studentPlans[]`, major plans only) in two ways:
@@ -71,5 +69,38 @@ The college has been read from the Student API (`academicStatuses[].studentPlans
 2. **Current:** `studentPlans[].academicPlan.academicProgram.academicGroup`. This correctly gives the college for undergrads (e.g. "College of Engineering"), but grad students come back as "Graduate Division". 
 
 If no plan has an `academicGroup`, the script falls back to `academicProgram.program` and then `academicPlan.ownedBy[].organization`.
+
+### Email functionality
+Emails are only sent from **Actions -> 2. Email ASEs Not Meeting Requirement** (`emailUnmetRequirement`). Running "Verify Minimum Units" never sends anything.
+
+Emails are sent with MailApp. YAMM is another alternative (and may require additional set up).
+
+**Who gets emailed:** rows on "Output" where all of the following are true:
+- "Unit requirement met?" is exactly FALSE (blank rows, e.g. lookup errors or colleges not on "Minimum Units by College", are skipped)
+- "RCL exempt?" is not TRUE
+- "Notified" is empty, so nobody is emailed twice
+
+Rows that qualify but have no email address are skipped. Their Student IDs are written to the execution log and counted in the confirmation box. This mostly affects students with no enrollment found (404) when "SID Input" didn't have an email for them.
+
+**Before sending:**
+1. If nobody qualifies, you get "No students to email." and nothing happens.
+2. It checks the account's remaining daily email quota (1,500 a day for Google Workspace accounts like Berkeley's) and stops if there isn't room for everyone.
+3. A Yes/No box shows how many students will be emailed and how many will be skipped for missing an address. Nothing is sent unless you click Yes.
+
+**Sending:**
+- Each email goes to the "Email" column. That's the value from "SID Input" if there was one, otherwise the primary email from the Enrollments API (usually @berkeley.edu).
+- It comes from the Google account that clicks the button, as plain text.
+- The subject and body come from `EMAIL_SUBJECT` and `EMAIL_BODY` at the top of the script. These placeholders are filled in per student:
+  - `{first}`: first name, or "there" if missing
+  - `{units}`: total units (a -1 from a 404 shows as 0)
+  - `{minimum}`: the minimum for their college
+  - `{college}`: their Home College
+- After each successful send, the time is written into that row's "Notified" cell. If one send fails, it's logged and the rest continue.
+- At the end you get "Sent X of Y emails."
+
+**Reruns and resending:**
+- Rerunning "Verify Minimum Units" keeps the "Notified" times (and "RCL exempt?" values) by Student ID, so clicking the email button again only reaches students who haven't been emailed yet, such as students newly below the minimum.
+- To email someone again, clear their "Notified" cell.
+- Duplicate Student IDs share their "Notified" value after a rerun.
 
 Ultimately, used in a process that checks whether the enrollment requirement has been met, and if not, be able to trigger an automated email to the impacted ASEs notifying them of their status. ("Automated" because the email goes out to all at once? OR "automated" once the script runs, the emails are automatically sent. Can also have emails being sent be its own button). 
