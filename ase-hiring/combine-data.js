@@ -7,7 +7,7 @@ function onOpen() {
     .addItem('2. Update Admin Sheet', 'generateAdminSheet')
     .addSeparator()
     .addItem('3. Update Instructor Sheets', 'generateInstructorSheets')
-    .addToUi()
+    .addSeparator()
     .addItem('All: Update Links, Admin Sheet, and Instructor Sheets', 'checkAndUpdateSheetsMenu')
     .addToUi();
 }
@@ -282,6 +282,11 @@ function fetchEnrollmentData(studentId) {
   const SCRIPT_PROPS = PropertiesService.getScriptProperties();
   const app_id = SCRIPT_PROPS.getProperty('app_id');
   const app_key = SCRIPT_PROPS.getProperty('app_key');
+
+  if (!app_id || !app_key) {
+    throw new Error("Ensure Script Properties are Set for the API id and key");
+  }
+
   const options = {
     'method': 'get',
     'headers': {
