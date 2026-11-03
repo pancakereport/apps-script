@@ -4,7 +4,7 @@ Academic student employees (ASEs) submit two applications: one on [ACG](https://
 
 This Apps Script combines information from the ALR, the supplemental application, and grade data from SIS and further creates sheets with proper sharing permissions for each course. 
 
-## Set up Instructions
+## `combine-data.js` Set up Instructions
 **Apps Script relies on the exact naming of sheets and expects a match between course naming in the Information sheet and ACG. Please be careful with how things are named and set up.**
 
 1. Download Applicant List Report from ACG and upload to Google Sheets. Name the sheet “ALR”.
@@ -23,3 +23,51 @@ Column A: Course Names; Column B: Course IDs from ACG (used to construct instruc
    
     c. `generateInstructorSheets`: Create a folder that contains a spreadsheet per course with columns identical to the admin sheet columns (with the exception of the admin link) with rows only for students who applied to that course. Folder is created in the same place in Google Drive as the spreadsheet you’re working from.
 8. If one or both of the supplemental application or ALR has an automatic sync, you can add a trigger to update the admin sheet on regular intervals. In the Apps Script page, click "Triggers" from the LH menu. Add a trigger that runs the `checkAndUpdateSheets` function with a "Time driven" event source. Because the API calls take a few minutes to run, I don't recommend triggers more than hourly. You should have failure notifications happen immediately.
+
+## About `verify-minimum-units.js` 
+
+On a Google Sheet with a sheet titled "SID Input" containing at least a column for "Student ID" (but possibly all columns output on the Admin Sheet from `combine-data.js`), output a new sheet titled "Output" with the following columns
+- First name
+- Last name
+- Email
+- Student ID
+- Home College (does not appear to be available currently from Admin Sheet, closest is Major. Could be pulled with the [student api](https://developers.api.berkeley.edu/api/6) (requires additional credentials))
+- Enrolled units
+- Waitlisted units
+- Total units
+- Unit requirement met? (TRUE/FALSE)
+- RCL exempt? (TRUE/FALSE/empty)
+
+"Unit requirement met?" should compare the total units(?) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies.
+
+"RCL exempt?" comes from an RCL exempt column in Input if there is one. You can also type TRUE/FALSE into Output directly, and reruns keep what you typed.
+
+To keep track of what term this should be run for, there is a "Semester Input" sheet. Cell A1 should have the term id. For Spring 2027, this would be 2227.
+
+If the API 404s for a student, their unit counts should be -1
+
+## `verify-minimum-units.js` Set up Instructions
+**Apps Script relies on the exact naming of sheets and columns. Please be careful with how things are named and set up.**
+
+1. Create a sheet named "SID Input" with a column titled "Student ID". You can also paste in the full Admin Sheet of hired applicants from `combine-data.js`. If they exist, "First name", "Last name", "Email", "Home College", and "RCL exempt?" columns are copied to the output (Supplemental names like "Student ID Number" and "Email Address" also work). If a student's "Home College" is blank or a placeholder like "N/A", it is looked up with the Student API instead. If the Student API doesn't return a college, the reason is shown in brackets in Home College, e.g. "[Student API: HTTP 403]". Home College is always shown on "Output", even if it doesn't match a college on "Minimum Units by College" (in which case "Unit requirement met?" is left blank). If name or email columns are missing or blank, they are filled in from the Enrollments API (lived name and primary email), except for students with no enrollment found (404). If the same Student ID appears on more than one row, each row appears in the output.
+2. In the same Spreadsheet, create a sheet named "Semester Input" and put the SIS term id in cell A1. Term ids are 2 + the last two digits of the year + 2 for Spring, 5 for Summer, or 8 for Fall (e.g. Fall 2026 is 2268, Spring 2027 is 2272).
+3. Create a sheet named "Minimum Units by College" with the columns "College" and "Units". College names are matched loosely (case, "College of", and "&" vs "and" are ignored), so "Letters & Science" matches "College of Letters and Science".
+4. Place the [Apps Script](verify-minimum-units.js) in the spreadsheet. To access Apps Script, click Extensions -> Apps Script. 
+5. Add Script Properties in the project settings on the Apps Script page:
+   - `app_id` and `app_key`: Enrollments API credentials (the same ones used by `combine-data.js`).
+   - `APP_ID_STUDENT` and `APP_KEY_STUDENT`: Student API credentials. Only needed if some students have a blank "Home College" on "SID Input". Without them, those students' Home College shows "[Student API: APP_ID_STUDENT / APP_KEY_STUDENT not set]" and "Unit requirement met?" is left blank.
+6. Reload the spreadsheet and use the "Actions" menu. You might need to approve permissions the first time.
+
+    a. `1. Verify Minimum Units` (`verifyMinimumUnits`): Create (or overwrite) the "Output" sheet. Units are blank if the API returned an error, and -1 if no enrollment was found (404). "Unit requirement met?" is blank if the student's college isn't on "Minimum Units by College". "RCL exempt?" can be edited directly on "Output"; reruns keep the values you entered (as do the "Notified" timestamps).
+
+    b. `2. Email ASEs Not Meeting Requirement` (`emailUnmetRequirement`): After confirming, emails every student on "Output" where "Unit requirement met?" is FALSE, "RCL exempt?" is not TRUE, and "Notified" is empty, then records the send time in "Notified". To resend to a student, clear their "Notified" cell. Edit `EMAIL_SUBJECT` and `EMAIL_BODY` at the top of the script to change the message.
+
+### How Home College is pulled from the Student API
+The college has been read from the Student API (`academicStatuses[].studentPlans[]`, major plans only) in two ways:
+
+1. **Previous:** `studentPlans[].academicProgram.academicGroup`. This path doesn't exist in the response (`academicProgram` is nested inside `academicPlan`), so the script fell back to the organization that owns the major, `academicPlan.ownedBy[].organization`. For undergrads this sometimes gave a major/department instead of a college (e.g. "Industrial Engineering and Operations Research" instead of "College of Engineering", or "Mathematics" instead of "Letters & Sciences"). For grad students, however, it correctly gave their college.
+2. **Current:** `studentPlans[].academicPlan.academicProgram.academicGroup`. This correctly gives the college for undergrads (e.g. "College of Engineering"), but grad students come back as "Graduate Division". 
+
+If no plan has an `academicGroup`, the script falls back to `academicProgram.program` and then `academicPlan.ownedBy[].organization`.
+
+Ultimately, used in a process that checks whether the enrollment requirement has been met, and if not, be able to trigger an automated email to the impacted ASEs notifying them of their status. ("Automated" because the email goes out to all at once? OR "automated" once the script runs, the emails are automatically sent. Can also have emails being sent be its own button). 
