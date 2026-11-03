@@ -31,16 +31,17 @@ On a Google Sheet with a sheet titled "SID Input" containing at least a column f
 - Last name
 - Email
 - Student ID
+- EGT
 - Home College (does not appear to be available currently from Admin Sheet, closest is Major. Could be pulled with the [student api](https://developers.api.berkeley.edu/api/6) (requires additional credentials))
 - Enrolled units
 - Waitlisted units
 - Total units
-- Unit requirement met? (TRUE/FALSE)
+- Unit requirement met? (TRUE/FALSE, empty if Home College not found on "Minimum Units by College" sheet)
 - RCL exempt? (TRUE/FALSE/empty)
 
-"Unit requirement met?" should compare the total units(?) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies.
+"Unit requirement met?" compares the enrolled units (waitlisted units don't count) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies.
 
-"RCL exempt?" comes from an RCL exempt column in Input if there is one. You can also type TRUE/FALSE into Output directly, and reruns keep what you typed.
+"RCL exempt?" comes from an RCL exempt column in Input if there is one. You can also type TRUE/FALSE into Output directly, and reruns keep what you typed. If it's still blank, it's set to TRUE when the student's only Home College is CDSS ("Clg of Comp Data Sci & Society" or "College of Computing, Data Science & Society", see `RCL_EXEMPT_COLLEGES`) and their EGT is the term on "Semester Input".
 
 To keep track of what term this should be run for, there is a "Semester Input" sheet. Cell A1 should have the term id. For Spring 2027, this would be 2227.
 
@@ -94,7 +95,7 @@ Rows that qualify but have no email address are skipped. Their Student IDs are w
 - It comes from the Google account that clicks the button, as plain text.
 - The subject and body come from `EMAIL_SUBJECT` and `EMAIL_BODY` at the top of the script. These placeholders are filled in per student:
   - `{first}`: first name, or "there" if missing
-  - `{units}`: total units (a -1 from a 404 shows as 0)
+  - `{units}`: enrolled units (a -1 from a 404 shows as 0)
   - `{minimum}`: the minimum for their college
   - `{college}`: their Home College
 - After each successful send, the time is written into that row's "Notified" cell. If one send fails, it's logged and the rest continue.

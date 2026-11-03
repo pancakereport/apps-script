@@ -12,15 +12,22 @@ function onOpen() {
 const EMAIL_SUBJECT = "Action needed: ASE minimum unit enrollment requirement";
 const EMAIL_BODY =
   "Hi {first},\n\n" +
-  "Our records show you are currently enrolled in (or waitlisted for) {units} units this term. " +
+  "Our records show you are currently enrolled in {units} units this term (waitlisted units don't count). " +
   "Academic student employees in {college} must be enrolled in at least {minimum} units " +
   "to hold an ASE appointment.\n\n" +
   "Please update your enrollment as soon as possible, or reply to this email if you believe " +
   "this is in error or have an approved Reduced Course Load.\n\n" +
   "Thank you.";
 
+// students whose only college is CDSS and who graduate this term are RCL exempt.
+// compared with normalizeCollege, so case, "&"/"and", and "College of" don't matter
+const RCL_EXEMPT_COLLEGES = [
+  "Clg of Comp Data Sci & Society",
+  "College of Computing, Data Science & Society"
+];
+
 const OUTPUT_HEADERS = [
-  "First name", "Last name", "Email", "Student ID", "Home College",
+  "First name", "Last name", "Email", "Student ID", "EGT", "Home College",
   "Enrolled units", "Waitlisted units", "Total units",
   "Unit requirement met?", "RCL exempt?", "Notified"
 ];
@@ -41,15 +48,15 @@ function verifyMinimumUnits(verbose = false) {
 
   // look up each SID once, even if it appears on multiple rows
   const unitsMap = {};
-  const collegeMap = {};
+  const studentMap = {};
   for (const student of students) {
     const sid = student.sid;
     if (!(sid in unitsMap)) {
       unitsMap[sid] = fetchEnrollmentData(sid, termId, verbose);
     }
-    // use the input sheet's college when it's provided, otherwise ask the student API
-    if (!hasCollege(student.college) && !(sid in collegeMap)) {
-      collegeMap[sid] = fetchHomeCollege(sid, verbose);
+    // student API gives EGT (and the college if the input sheet doesn't have it)
+    if (!(sid in studentMap)) {
+      studentMap[sid] = fetchStudentInfo(sid, verbose);
     }
   }
 
@@ -58,9 +65,13 @@ function verifyMinimumUnits(verbose = false) {
     const units = unitsMap[sid];
     // shown even if it isn't on the minimum units sheet. If the student API
     // didn't find a college, show why, e.g. "[Student API: HTTP 403]"
-    const college = hasCollege(student.college) ? student.college : (collegeMap[sid] || "");
+    const info = studentMap[sid] || {};
+    // use the input sheet's college when it's provided, otherwise the student API's
+    const college = hasCollege(student.college) ? student.college : (info.college || "");
     const prev = previous[sid] || {};
-    const rcl = toBoolOrEmpty(student.rcl !== "" ? student.rcl : prev.rcl);
+    // input sheet first, then what was on Output last run, then auto-exempt
+    let rcl = toBoolOrEmpty(student.rcl !== "" ? student.rcl : prev.rcl);
+    if (rcl === "" && isAutoRclExempt(college, info.egt, termId)) rcl = true;
 
     // blank units = API error, -1 = API returned 404
     let enrolled = "", waitlisted = "", total = "", met = "";
@@ -71,24 +82,29 @@ function verifyMinimumUnits(verbose = false) {
       const minimum = lookupMinimum(college, minimums);
       // blank if college isn't on the minimum units sheet
       if (minimum !== null) {
-        met = total >= minimum;
+        // only enrolled units count, not waitlisted (-1 from a 404 is never met)
+        met = units.enrolled >= minimum;
       }
     }
     // fall back to the API for name and email if not on the input sheet
     const first = student.first || units?.first || "";
     const last = student.last || units?.last || "";
     const email = student.email || units?.email || "";
-    return [first, last, email, sid, college,
+    return [first, last, email, sid, info.egt || "", college,
             enrolled, waitlisted, total, met, rcl, prev.notified || ""];
   });
 
   writeOutput(rows, "Output");
 
-  const failed = rows.filter(r => r[7] === "").length;
-  const notFound = rows.filter(r => r[7] === -1).length;
-  const noCollege = rows.filter(r => r[4] === "" || String(r[4]).startsWith("[")).length;
-  const unmatched = rows.filter(r => r[4] !== "" && !String(r[4]).startsWith("[") && r[7] !== "" && r[8] === "").length;
-  const unmet = rows.filter(r => r[8] === false).length;
+  const collegeCol = OUTPUT_HEADERS.indexOf("Home College");
+  const totalCol = OUTPUT_HEADERS.indexOf("Total units");
+  const metCol = OUTPUT_HEADERS.indexOf("Unit requirement met?");
+  const failed = rows.filter(r => r[totalCol] === "").length;
+  const notFound = rows.filter(r => r[totalCol] === -1).length;
+  const noCollege = rows.filter(r => r[collegeCol] === "" || String(r[collegeCol]).startsWith("[")).length;
+  const unmatched = rows.filter(r => r[collegeCol] !== "" && !String(r[collegeCol]).startsWith("[") &&
+    r[totalCol] !== "" && r[metCol] === "").length;
+  const unmet = rows.filter(r => r[metCol] === false).length;
   let msg = `Checked ${rows.length} students for term ${termId}. ${unmet} below minimum.`;
   if (notFound) msg += ` ${notFound} had no enrollment found (units = -1).`;
   if (failed) msg += ` ${failed} enrollment lookups failed (blank units).`;
@@ -222,8 +238,10 @@ function writeOutput(rows, outputSheetName) {
   outputSheet.getRange(1, 1, 1, OUTPUT_HEADERS.length).setValues([OUTPUT_HEADERS]);
   if (rows.length > 0) {
     outputSheet.getRange(2, 1, rows.length, OUTPUT_HEADERS.length).setValues(rows);
-    // SIDs as plain text so leading zeros aren't dropped
-    outputSheet.getRange(2, OUTPUT_HEADERS.indexOf("Student ID") + 1, rows.length, 1).setNumberFormat("@");
+    // SIDs as plain text so leading zeros aren't dropped, EGT so term ids aren't numbers/dates
+    ["Student ID", "EGT"].forEach(header => {
+      outputSheet.getRange(2, OUTPUT_HEADERS.indexOf(header) + 1, rows.length, 1).setNumberFormat("@");
+    });
   }
   // Formatting: Bold headers and freeze top row
   outputSheet.getRange(1, 1, 1, OUTPUT_HEADERS.length).setFontWeight("bold");
@@ -238,7 +256,7 @@ function writeOutput(rows, outputSheetName) {
 function testSID() {
   const sid = "";
   Logger.log(JSON.stringify(fetchEnrollmentData(sid, readTermId("Semester Input"), true)));
-  Logger.log(fetchHomeCollege(sid, true));
+  Logger.log(JSON.stringify(fetchStudentInfo(sid, true)));
 }
 
 /**
@@ -325,25 +343,29 @@ function fetchEnrollmentData(studentId, termId, verbose = false) {
 }
 
 /**
- * Gets the home college for each of a student's majors, across all careers
- * (undergrad and grad). Multiple colleges are joined with "; ".
- * If no college is found, returns a note in brackets saying why so it shows
- * up on the Output sheet, e.g. "[Student API: HTTP 403]".
+ * Gets the home college and expected graduation term (EGT) for each of a
+ * student's majors, across all careers (undergrad and grad). Multiple
+ * colleges / EGTs are joined with "; ".
+ * If no college is found, college is a note in brackets saying why so it shows
+ * up on the Output sheet, e.g. "[Student API: HTTP 403]", and EGT is blank.
  * @param {string} studentId The student's ID.
- * @returns {string} e.g. "College of Engineering" or "[Student API: ...]"
+ * @returns {{college: string, egt: string}} e.g.
+ *   {college: "College of Engineering", egt: "2268"}
  */
-function fetchHomeCollege(studentId, verbose = false) {
+function fetchStudentInfo(studentId, verbose = false) {
+  // on any error, show why in the college column
+  const error = reason => ({ college: `[Student API: ${reason}]`, egt: "" });
   if (!studentId) {
     Logger.log("You appear to have passed in an empty SID (student API). Further investigation may be needed.")
-    return "[Student API: empty SID]";
+    return error("empty SID");
   }
   const scriptProps = PropertiesService.getScriptProperties();
   const app_id = scriptProps.getProperty('APP_ID_STUDENT');
   const app_key = scriptProps.getProperty('APP_KEY_STUDENT');
   // student API is optional if the input sheet has a "Home College" column
   if (!app_id || !app_key) {
-    Logger.log(`No Student API credentials set, no Home College for ${studentId}.`);
-    return "[Student API: APP_ID_STUDENT / APP_KEY_STUDENT not set]";
+    Logger.log(`No Student API credentials set, no Home College or EGT for ${studentId}.`);
+    return error("APP_ID_STUDENT / APP_KEY_STUDENT not set");
   }
   const url = `https://gateway.api.berkeley.edu/sis/v2/students/${studentId}?id-type=student-id&inc-acad=true&inc-cntc=false&inc-regs=false&inc-attr=false&inc-dmgr=false&inc-work=false&inc-dob=false&inc-gndr=false`;
   const options = {
@@ -385,6 +407,12 @@ function fetchHomeCollege(studentId, verbose = false) {
         .forEach(college => {
           if (!colleges.includes(college)) colleges.push(college);
         });
+      // EGT is a term id, e.g. "2268", same as pull-transcript-grades.js
+      const egts = [];
+      usePlans.forEach(plan => {
+        const egt = plan.expectedGraduationTerm?.id;
+        if (egt && !egts.includes(egt)) egts.push(egt);
+      });
       // if the response isn't shaped as expected, take any academicGroup in it
       if (colleges.length === 0) {
         findAcademicGroups(student).forEach(college => {
@@ -395,19 +423,19 @@ function fetchHomeCollege(studentId, verbose = false) {
         // show the raw plan data so you can see where the college is
         const raw = plans.length > 0 ? JSON.stringify(plans) : JSON.stringify(student);
         Logger.log(`No college found for ${studentId}. Plans: ${raw}`);
-        return `[Student API: no college found. ${plans.length} plans: ${raw.slice(0, 2000)}]`;
+        return { college: `[Student API: no college found. ${plans.length} plans: ${raw.slice(0, 2000)}]`, egt: egts.join("; ") };
       }
       if (verbose) {
-        Logger.log(`Colleges for ${studentId}: ${colleges.join("; ")}`);
+        Logger.log(`Colleges for ${studentId}: ${colleges.join("; ")}, EGT: ${egts.join("; ")}`);
       }
-      return colleges.join("; ");
+      return { college: colleges.join("; "), egt: egts.join("; ") };
     } else {
       Logger.log(`Student API Error for ${studentId}: HTTP ${responseCode}`);
-      return `[Student API: HTTP ${responseCode}]`;
+      return error(`HTTP ${responseCode}`);
     }
-  } catch (error) {
-    Logger.log(`Student API Exception for ${studentId}: ${error.toString()}`);
-    return `[Student API: ${error.toString()}]`;
+  } catch (e) {
+    Logger.log(`Student API Exception for ${studentId}: ${e.toString()}`);
+    return error(e.toString());
   }
 }
 
@@ -510,6 +538,16 @@ function lookupMinimum(college, minimums) {
   return found.length > 0 ? Math.max(...found) : null;
 }
 
+// helper to check if a student is RCL exempt because their only college is
+// CDSS and their EGT is the term being checked ("A; B" means more than one college)
+function isAutoRclExempt(college, egt, termId) {
+  const colleges = String(college ?? "").split(";").map(normalizeCollege).filter(c => c);
+  const exempt = RCL_EXEMPT_COLLEGES.map(normalizeCollege);
+  const egts = String(egt ?? "").split(";").map(e => e.trim()).filter(e => e);
+  return colleges.length === 1 && exempt.includes(colleges[0]) &&
+    egts.length > 0 && egts.every(e => e === String(termId).trim());
+}
+
 // helper to check if the input sheet has a college for a student,
 // i.e. it's not blank or a placeholder ("N/A", "-", ...)
 function hasCollege(college) {
@@ -557,11 +595,11 @@ function emailUnmetRequirement() {
   const emailIndex = headers.indexOf("Email");
   const sidIndex = headers.indexOf("Student ID");
   const collegeIndex = headers.indexOf("Home College");
-  const totalIndex = headers.indexOf("Total units");
+  const enrolledIndex = headers.indexOf("Enrolled units");
   const metIndex = headers.indexOf("Unit requirement met?");
   const rclIndex = headers.indexOf("RCL exempt?");
   const notifiedIndex = headers.indexOf("Notified");
-  if ([firstIndex, emailIndex, sidIndex, collegeIndex, totalIndex, metIndex, rclIndex, notifiedIndex].includes(-1)) {
+  if ([firstIndex, emailIndex, sidIndex, collegeIndex, enrolledIndex, metIndex, rclIndex, notifiedIndex].includes(-1)) {
     throw new Error("Missing one or more columns on 'Output'. Rerun Verify Minimum Units.");
   }
   const minimums = readMinimums("Minimum Units by College");
@@ -608,7 +646,7 @@ function emailUnmetRequirement() {
     const body = EMAIL_BODY
       .replace(/{first}/g, row[firstIndex] || "there")
       // -1 (no enrollment found) shows as 0
-      .replace(/{units}/g, Math.max(0, Number(row[totalIndex])))
+      .replace(/{units}/g, Math.max(0, Number(row[enrolledIndex])))
       .replace(/{minimum}/g, minimum ?? "the required number of")
       .replace(/{college}/g, row[collegeIndex] || "your college");
     try {
