@@ -66,9 +66,11 @@ If the API 404s for a student, their unit counts should be -1
 The college has been read from the Student API (`academicStatuses[].studentPlans[]`, major plans only) in two ways:
 
 1. **Previous:** `studentPlans[].academicProgram.academicGroup`. This path doesn't exist in the response (`academicProgram` is nested inside `academicPlan`), so the script fell back to the organization that owns the major, `academicPlan.ownedBy[].organization`. For undergrads this sometimes gave a major/department instead of a college (e.g. "Industrial Engineering and Operations Research" instead of "College of Engineering", or "Mathematics" instead of "Letters & Sciences"). For grad students, however, it correctly gave their college.
-2. **Current:** `studentPlans[].academicPlan.academicProgram.academicGroup`. This correctly gives the college for undergrads (e.g. "College of Engineering"), but grad students come back as "Graduate Division". 
+2. **Undergrad:** `studentPlans[].academicPlan.academicProgram.academicGroup`. This correctly gives the college for undergrads (e.g. "College of Engineering"), but grad students come back as "Graduate Division". 
 
-If no plan has an `academicGroup`, the script falls back to `academicProgram.program` and then `academicPlan.ownedBy[].organization`.
+The script now uses both ways. A plan counts as grad if its career is `GRAD` or its `academicGroup` is "Graduate Division".
+- **Undergrad plans:** `academicGroup`, then `academicProgram.program`, then `academicPlan.ownedBy[].organization`.
+- **Grad plans:** `academicPlan.ownedBy[].organization`, then `academicGroup` (unless it's Graduate Division), then `academicProgram.program`.
 
 ### Email functionality
 Emails are only sent from **Actions -> 2. Email ASEs Not Meeting Requirement** (`emailUnmetRequirement`). Running "Verify Minimum Units" never sends anything.

@@ -367,12 +367,24 @@ function fetchHomeCollege(studentId, verbose = false) {
       }
       // ASEs can be grad students, so check every career (UGRD, GRAD, ...)
       const plans = [];
+      const gradPlans = new Set();
       (student.academicStatuses || []).forEach(status => {
-        (status.studentPlans || []).forEach(plan => plans.push(plan));
+        (status.studentPlans || []).forEach(plan => {
+          plans.push(plan);
+          if (isGradPlan(plan, status)) gradPlans.add(plan);
+        });
       });
       // record college for each major plan, or any plan if there are no majors
       const majorPlans = plans.filter(plan => plan.academicPlan?.type?.code === "MAJ");
-      const colleges = collegesFromPlans(majorPlans.length > 0 ? majorPlans : plans);
+      const usePlans = majorPlans.length > 0 ? majorPlans : plans;
+      // undergrads: academicGroup is their college. grads: academicGroup is
+      // "Graduate Division", so use the organization that owns the plan instead
+      const colleges = [];
+      collegesFromPlans(usePlans.filter(plan => !gradPlans.has(plan)), UNDERGRAD_LEVELS)
+        .concat(collegesFromPlans(usePlans.filter(plan => gradPlans.has(plan)), GRAD_LEVELS))
+        .forEach(college => {
+          if (!colleges.includes(college)) colleges.push(college);
+        });
       // if the response isn't shaped as expected, take any academicGroup in it
       if (colleges.length === 0) {
         findAcademicGroups(student).forEach(college => {
@@ -399,21 +411,33 @@ function fetchHomeCollege(studentId, verbose = false) {
   }
 }
 
-// helper to get colleges from a student's plans. Tries each level across
+// helpers to get colleges from a student's plans. Tries each level across
 // all plans before moving to the next, so a plan missing its college doesn't
-// add a major/department next to another plan's college:
+// add a major/department next to another plan's college.
+// academicProgram is nested in academicPlan, i.e.
+// studentPlans[].academicPlan.academicProgram.academicGroup
+const programOf = plan => plan?.academicPlan?.academicProgram || plan?.academicProgram;
+const groupOf = plan => programOf(plan)?.academicGroup;
+const programLevel = plan => programOf(plan)?.program;
+const ownerLevel = plan => plan?.academicPlan?.ownedBy?.[0]?.organization;
+
+// undergrads:
 // 1. academicGroup (e.g. "College of Engineering" or code "COE")
 // 2. academicProgram (e.g. "Undergrad Engineering")
 // 3. the organization that owns the plan (e.g. "Industrial Engineering and Operations Research")
-// academicProgram is nested in academicPlan, i.e.
-// studentPlans[].academicPlan.academicProgram.academicGroup
-function collegesFromPlans(plans) {
-  const programOf = plan => plan?.academicPlan?.academicProgram || plan?.academicProgram;
-  const levels = [
-    plan => programOf(plan)?.academicGroup,
-    plan => programOf(plan)?.program,
-    plan => plan?.academicPlan?.ownedBy?.[0]?.organization
-  ];
+const UNDERGRAD_LEVELS = [groupOf, programLevel, ownerLevel];
+
+// grads: academicGroup is "Graduate Division", so
+// 1. the organization that owns the plan (e.g. "College of Engineering")
+// 2. academicGroup, unless it's Graduate Division
+// 3. academicProgram
+const GRAD_LEVELS = [
+  ownerLevel,
+  plan => isGraduateDivision(groupOf(plan)) ? null : groupOf(plan),
+  programLevel
+];
+
+function collegesFromPlans(plans, levels) {
   for (const getField of levels) {
     const colleges = [];
     plans.forEach(plan => {
@@ -424,6 +448,24 @@ function collegesFromPlans(plans) {
     if (colleges.length > 0) return colleges;
   }
   return [];
+}
+
+// helper to check if a plan is a grad plan, from its career (GRAD) or
+// because its academicGroup is Graduate Division
+function isGradPlan(plan, status) {
+  const careers = [
+    status?.studentCareer?.academicCareer?.code,
+    status?.academicCareer?.code,
+    programOf(plan)?.academicCareer?.code
+  ];
+  return careers.includes("GRAD") || isGraduateDivision(groupOf(plan));
+}
+
+// helper to check if an academicGroup is Graduate Division
+function isGraduateDivision(group) {
+  if (!group) return false;
+  return [group.formalDescription, group.description, group.code]
+    .some(v => /^grad(uate)?\s*div(ision)?$|^graddiv$/i.test(String(v ?? "").trim()));
 }
 
 // helper to find every academicGroup (college) anywhere in an API response
