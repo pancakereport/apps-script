@@ -460,6 +460,14 @@ const programOf = plan => plan?.academicPlan?.academicProgram || plan?.academicP
 const groupOf = plan => programOf(plan)?.academicGroup;
 const programLevel = plan => programOf(plan)?.program;
 const ownerLevel = plan => plan?.academicPlan?.ownedBy?.[0]?.organization;
+// the plan's short description, e.g. "Landscp Arch & Env Plan PhD"
+const planLevel = plan => {
+  const p = plan?.academicPlan?.plan;
+  return p && (p.description || p.formalDescription) ? { description: p.description || p.formalDescription } : null;
+};
+// helper to check if an organization is a school/college rather than a department
+const isSchoolOrCollege = org =>
+  !!org && [org.formalDescription, org.description].some(v => /\b(school|college)\b/i.test(String(v ?? "")));
 
 // undergrads:
 // 1. academicGroup (e.g. "College of Engineering" or code "COE")
@@ -468,10 +476,14 @@ const ownerLevel = plan => plan?.academicPlan?.ownedBy?.[0]?.organization;
 const UNDERGRAD_LEVELS = [groupOf, programLevel, ownerLevel];
 
 // grads: academicGroup is "Graduate Division", so
-// 1. the organization that owns the plan (e.g. "College of Engineering")
-// 2. academicGroup, unless it's Graduate Division
-// 3. academicProgram
+// 1. the organization that owns the plan if it's a school/college
+//    (e.g. "School of Information"), otherwise the plan itself, since the
+//    owner is just a department (e.g. "Landscp Arch & Env Plan PhD")
+// 2. the organization that owns the plan
+// 3. academicGroup, unless it's Graduate Division
+// 4. academicProgram
 const GRAD_LEVELS = [
+  plan => isSchoolOrCollege(ownerLevel(plan)) ? ownerLevel(plan) : planLevel(plan),
   ownerLevel,
   plan => isGraduateDivision(groupOf(plan)) ? null : groupOf(plan),
   programLevel
@@ -533,14 +545,27 @@ function findAcademicGroups(node, found = []) {
 /**
  * Minimum units for a college. Matches exactly after normalizing, then by
  * substring (so "Engineering" matches "College of Engineering").
+ * Colleges containing a grad degree (GRAD_DEGREES, e.g. "... PhD") get GRAD_DEGREE_MINIMUM.
  * If a student belongs to more than one college ("A; B"), the highest minimum applies.
  * @returns {number|null} null when no college matches.
  */
+// a Home College containing one of these degrees as a whole word (exact
+// case, so "MA" doesn't match "Match" or "Ma") gets this minimum instead of
+// the "Minimum Units by College" sheet's
+const GRAD_DEGREES = ["PhD", "MCP", "MA", "MS", "MEng", "MBA"];
+const GRAD_DEGREE_MINIMUM = 12;
+const GRAD_DEGREE_PATTERN = new RegExp(`(?<![A-Za-z0-9])(${GRAD_DEGREES.join("|")})(?![A-Za-z0-9])`);
+
 function lookupMinimum(college, minimums) {
   // blank, or a "[Student API: ...]" note
   if (!college || String(college).startsWith("[")) return null;
   const found = [];
   String(college).split(";").forEach(c => {
+    // grad degree plans (e.g. "Landscp Arch & Env Plan PhD") have a fixed minimum
+    if (GRAD_DEGREE_PATTERN.test(c)) {
+      found.push(GRAD_DEGREE_MINIMUM);
+      return;
+    }
     const key = normalizeCollege(c);
     if (!key) return;
     const match = minimums.find(m => m.college === key) ||

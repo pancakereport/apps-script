@@ -39,7 +39,7 @@ On a Google Sheet with a sheet titled "SID Input" containing at least a column f
 - Unit requirement met? (TRUE/FALSE, empty if Home College not found on "Minimum Units by College" sheet)
 - RCL exempt? (TRUE/FALSE/empty)
 
-"Unit requirement met?" compares the enrolled units (waitlisted units don't count) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies.
+"Unit requirement met?" compares the enrolled units (waitlisted units don't count) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies. If the Home College contains "PhD", "MCP", "MA", "MS", "MEng" or "MBA" as a whole word (exact case, so "MA" doesn't match "Match"), the minimum is 12 units instead of the sheet's (set in `GRAD_DEGREES` / `GRAD_DEGREE_MINIMUM`).
 
 "RCL exempt?" comes from an RCL exempt column in Input if there is one. You can also type TRUE/FALSE into Output directly, and reruns keep what you typed. If it's still blank, it's set to TRUE when the student's only Home College is CDSS ("Clg of Comp Data Sci & Society" or "College of Computing, Data Science & Society", see `RCL_EXEMPT_COLLEGES`) and their EGT is the term on "Semester Input".
 
@@ -71,7 +71,7 @@ The college has been read from the Student API (`academicStatuses[].studentPlans
 
 The script now uses both ways. A plan counts as grad if its career is `GRAD` or its `academicGroup` is "Graduate Division".
 - **Undergrad plans:** `academicGroup`, then `academicProgram.program`, then `academicPlan.ownedBy[].organization`.
-- **Grad plans:** `academicPlan.ownedBy[].organization`, then `academicGroup` (unless it's Graduate Division), then `academicProgram.program`.
+- **Grad plans:** `academicPlan.ownedBy[].organization` if it's a school or college (its name contains "School" or "College", e.g. "School of Information"). Otherwise the owner is just a department, so the plan's description is used instead (`academicPlan.plan.description`, e.g. "Landscp Arch & Env Plan PhD"). Then fallbacks: `ownedBy[].organization`, `academicGroup` (unless it's Graduate Division), `academicProgram.program`.
 
 ### Email functionality
 Emails are only sent from **Actions -> 2. Email ASEs Not Meeting Requirement** (`emailUnmetRequirement`). Running "Verify Minimum Units" never sends anything.
