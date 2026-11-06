@@ -263,6 +263,7 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
 
   // dynamically determine the number of weeks/columns from the base sheet
   let numWeeks = 0;
+  let totalHoursRow = null;
   try {
     const baseSpreadsheet = SpreadsheetApp.openById(baseSheetID);
     const baseSheet = baseSpreadsheet.getSheets()[0]; // Assumes the first sheet contains the schedule
@@ -291,6 +292,14 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
 
     Logger.log(`Detected ${numWeeks} weeks from the base sheet template.`);
 
+    // find the row whose column A says "Total Hours" (the row may move between semesters)
+    const colA = baseSheet.getRange(1, 1, baseSheet.getLastRow(), 1).getValues();
+    const totalIndex = colA.findIndex(([val]) => String(val).trim().toLowerCase() === "total hours");
+    if (totalIndex !== -1) {
+      totalHoursRow = totalIndex + 1; // convert 0-indexed array position to 1-indexed row
+      Logger.log(`Found "Total Hours" in row ${totalHoursRow} of the base sheet template.`);
+    }
+
   } catch (e) {
     Logger.log(`ERROR reading base sheet: ${e.message}. Defaulting to 18 weeks.`);
     numWeeks = 18; // safe fallback
@@ -300,6 +309,11 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
   if (numWeeks === 0) {
     Logger.log(`No 'week' headers found in Row 2 or Row 3. Applying fallback default of 18 weeks.`);
     numWeeks = 18;
+  }
+
+  // no safe fallback here: guessing a row could silently copy the wrong data (e.g. dates)
+  if (totalHoursRow === null) {
+    throw new Error(`Could not find a row with "Total Hours" in column A of the base sheet for ${course} (${baseSheetID}).`);
   }
 
   // check if the admin sheet already exists
@@ -421,7 +435,7 @@ function setUpShadowSheetsAndIndex(baseSheetID,targetFolderID, course, semester,
       // the following may be a little slower than doing math but hopefully not a big deal here
       // slow because .getRange() and .getA1Notation() repeatedly make a call to Google's spreadsheet servers
       const shadowColLetter = mainSheet.getRange(1, col).getA1Notation().replace(/\d+/, "");
-      const formula = `='${name}'!${shadowColLetter}4`;
+      const formula = `='${name}'!${shadowColLetter}${totalHoursRow}`;
       mainSheet.getRange(row, col).setFormula(formula);
     }
 
