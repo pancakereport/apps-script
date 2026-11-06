@@ -105,5 +105,3 @@ Rows that qualify but have no email address are skipped. Their Student IDs are w
 - If a student met the requirement on the last run but doesn't now, their "Notified" cell is cleared so they're emailed again.
 - To email someone again, clear their "Notified" cell.
 - Duplicate Student IDs share their "Notified" value after a rerun.
-
-Ultimately, used in a process that checks whether the enrollment requirement has been met, and if not, be able to trigger an automated email to the impacted ASEs notifying them of their status. ("Automated" because the email goes out to all at once? OR "automated" once the script runs, the emails are automatically sent. Can also have emails being sent be its own button). 
