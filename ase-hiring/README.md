@@ -26,31 +26,35 @@ Column A: Course Names; Column B: Course IDs from ACG (used to construct instruc
 
 ## About `verify-minimum-units.js` 
 
-On a Google Sheet with a sheet titled "SID Input" containing at least a column for "Student ID" (but possibly all columns output on the Admin Sheet from `combine-data.js`), output a new sheet titled "Output" with the following columns
+See `verify-minimum-units-setup-sheet.xlsx` for all necessary sheets. This should be the Google Sheet that `verify-minimum-units.js` is attached to.
+
+On a Google Sheet with a sheet titled "SID Input" containing at least a column for "Student ID", output a new sheet titled "Output" with the following columns
 - First name
 - Last name
 - Email
 - Student ID
 - EGT
-- Home College (does not appear to be available currently from Admin Sheet, closest is Major. Could be pulled with the [student api](https://developers.api.berkeley.edu/api/6) (requires additional credentials))
+- Home College (copied from "SID Input" if provided or pulled from the [student api](https://developers.api.berkeley.edu/api/6) (requires additional credentials))
 - Enrolled units
 - Waitlisted units
 - Total units
 - Unit requirement met? (TRUE/FALSE, empty if Home College not found on "Minimum Units by College" sheet)
 - RCL exempt? (TRUE/FALSE/empty)
 
-"Unit requirement met?" compares the enrolled units (waitlisted units don't count) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies. If the Home College contains "PhD", "MCP", "MA", "MS", "MEng" or "MBA" as a whole word (exact case, so "MA" doesn't match "Match"), the minimum is 12 units instead of the sheet's (set in `GRAD_DEGREES` / `GRAD_DEGREE_MINIMUM`).
+If they exist, "First name", "Last name", "Email", "Home College", and "RCL exempt?" columns are copied to the output (Supplemental names like "Student ID Number" and "Email Address" also work). If a student's "Home College" is blank or a placeholder like "N/A", it is looked up with the Student API. If the Student API doesn't return a college, the reason is shown in brackets in Home College, e.g. "[Student API: HTTP 403]". Home College is always shown on "Output", even if it doesn't match a college on "Minimum Units by College" (in which case "Unit requirement met?" is left blank). If name or email columns are missing or blank, they are filled in from the Enrollments API (lived name and primary email), except for students with no enrollment found (404). If the API doesn't return them either, you can type them into "Output" and reruns keep what you typed (unless the API returns them on a later run, which overwrites it). If the same Student ID appears on more than one row, each row appears in the output.
 
-"RCL exempt?" comes from an RCL exempt column in Input if there is one. You can also type TRUE/FALSE into Output directly, and reruns keep what you typed. If it's still blank, it's set to TRUE when the student's only Home College is CDSS ("Clg of Comp Data Sci & Society" or "College of Computing, Data Science & Society", see `RCL_EXEMPT_COLLEGES`) and their EGT is the term on "Semester Input".
+"Unit requirement met?" compares the enrolled units (waitlisted units don't count) to the minimum units required by the hired applicant's home college. The minimum units according to college can be found on a sheet titled "Minimum Units by College" which has the columns "College" and "Units". If a student belongs to more than one college, the highest minimum applies. If the Home College contains "PhD", "MCP", "MA", "MS", "MEng" or "MBA" as a whole word (exact case, so "MA" doesn't match "Math"), the minimum is 12 units instead of the sheet's (set in `GRAD_DEGREES` / `GRAD_DEGREE_MINIMUM`).
 
-To keep track of what term this should be run for, there is a "Semester Input" sheet. Cell A1 should have the term id. For Spring 2027, this would be 2227.
+"RCL exempt?" comes from an RCL exempt column in Input if there is one. You can also type TRUE/FALSE into Output directly, and reruns keep what you typed. If it's still blank, it's set to TRUE when the student's only Home College is CDSS ("Clg of Comp Data Sci & Society" or "College of Computing, Data Science & Society", see `RCL_EXEMPT_COLLEGES`) and their EGT is the term on the "Semester Input" Sheet. All other students must request a RCL and provide proof of approval.
 
-If the API 404s for a student, their unit counts should be -1
+To keep track of what term this should be run for, there is a "Semester Input" sheet. Cell A1 should have the term id. For Spring 2027, this would be 2272.
+
+Units are blank if the API returned an error, and -1 if no enrollment was found (404).
 
 ## `verify-minimum-units.js` Set up Instructions
 **Apps Script relies on the exact naming of sheets and columns. Please be careful with how things are named and set up.**
 
-1. Create a sheet named "SID Input" with a column titled "Student ID". You can also paste in the full Admin Sheet of hired applicants from `combine-data.js`. If they exist, "First name", "Last name", "Email", "Home College", and "RCL exempt?" columns are copied to the output (Supplemental names like "Student ID Number" and "Email Address" also work). If a student's "Home College" is blank or a placeholder like "N/A", it is looked up with the Student API instead. If the Student API doesn't return a college, the reason is shown in brackets in Home College, e.g. "[Student API: HTTP 403]". Home College is always shown on "Output", even if it doesn't match a college on "Minimum Units by College" (in which case "Unit requirement met?" is left blank). If name or email columns are missing or blank, they are filled in from the Enrollments API (lived name and primary email), except for students with no enrollment found (404). If the API doesn't return them either, you can type them into "Output" and reruns keep what you typed (unless the API returns them on a later run, which overwrites it). If the same Student ID appears on more than one row, each row appears in the output.
+1. Create a sheet named "SID Input" with a column titled "Student ID" and paste all SIDs you want to verify into that column.
 2. In the same Spreadsheet, create a sheet named "Semester Input" and put the SIS term id in cell A1. Term ids are 2 + the last two digits of the year + 2 for Spring, 5 for Summer, or 8 for Fall (e.g. Fall 2026 is 2268, Spring 2027 is 2272).
 3. Create a sheet named "Minimum Units by College" with the columns "College" and "Units". College names are matched loosely (case, "College of", and "&" vs "and" are ignored), so "Letters & Science" matches "College of Letters and Science".
 4. Place the [Apps Script](verify-minimum-units.js) in the spreadsheet. To access Apps Script, click Extensions -> Apps Script. 
@@ -59,22 +63,17 @@ If the API 404s for a student, their unit counts should be -1
    - `APP_ID_STUDENT` and `APP_KEY_STUDENT`: Student API credentials. Only needed if some students have a blank "Home College" on "SID Input". Without them, those students' Home College shows "[Student API: APP_ID_STUDENT / APP_KEY_STUDENT not set]" and "Unit requirement met?" is left blank.
 6. Reload the spreadsheet and use the "Actions" menu. You might need to approve permissions the first time.
 
-    a. `1. Verify Minimum Units` (`verifyMinimumUnits`): Create (or overwrite) the "Output" sheet. Units are blank if the API returned an error, and -1 if no enrollment was found (404). "Unit requirement met?" is blank if the student's college isn't on "Minimum Units by College". "RCL exempt?" can be edited directly on "Output"; reruns keep the values you entered (as do the "Notified" timestamps).
+    a. `1. Verify Minimum Units` (`verifyMinimumUnits`): Create (or overwrite) the "Output" sheet.
 
     b. `2. Email ASEs Not Meeting Requirement` (`emailUnmetRequirement`): After confirming, emails every student on "Output" where "Unit requirement met?" is FALSE, "RCL exempt?" is not TRUE, and "Notified" is empty, then records the send time in "Notified". To resend to a student, clear their "Notified" cell. Edit `EMAIL_SUBJECT` and `EMAIL_BODY` at the top of the script to change the message. See [Email functionality](#email-functionality) for details.
 
 ### How Home College is pulled from the Student API
-The college has been read from the Student API (`academicStatuses[].studentPlans[]`, major plans only) in two ways:
-
-1. **Previous:** `studentPlans[].academicProgram.academicGroup`. This path doesn't exist in the response (`academicProgram` is nested inside `academicPlan`), so the script fell back to the organization that owns the major, `academicPlan.ownedBy[].organization`. For undergrads this sometimes gave a major/department instead of a college (e.g. "Industrial Engineering and Operations Research" instead of "College of Engineering", or "Mathematics" instead of "Letters & Sciences"). For grad students, however, it correctly gave their college.
-2. **Undergrad:** `studentPlans[].academicPlan.academicProgram.academicGroup`. This correctly gives the college for undergrads (e.g. "College of Engineering"), but grad students come back as "Graduate Division". 
-
-The script now uses both ways. A plan counts as grad if its career is `GRAD` or its `academicGroup` is "Graduate Division".
+The college has been read from the Student API (`academicStatuses[].studentPlans[]`, major plans only) in three ways. A plan counts as grad if its career is `GRAD` or its `academicGroup` is "Graduate Division".
 - **Undergrad plans:** `academicGroup`, then `academicProgram.program`, then `academicPlan.ownedBy[].organization`.
 - **Grad plans:** `academicPlan.ownedBy[].organization` if it's a school or college (its name contains "School" or "College", e.g. "School of Information"). Otherwise the owner is just a department, so the plan's description is used instead (`academicPlan.plan.description`, e.g. "Landscp Arch & Env Plan PhD"). Then fallbacks: `ownedBy[].organization`, `academicGroup` (unless it's Graduate Division), `academicProgram.program`.
 
 ### Email functionality
-Emails are only sent from **Actions -> 2. Email ASEs Not Meeting Requirement** (`emailUnmetRequirement`). Running "Verify Minimum Units" never sends anything.
+Emails are only sent from **Actions -> 2. Email ASEs Not Meeting Requirement**. Running "Verify Minimum Units" never sends anything.
 
 Emails are sent with MailApp. YAMM is another alternative (and may require additional set up).
 
